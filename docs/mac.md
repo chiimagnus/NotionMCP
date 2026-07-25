@@ -65,7 +65,7 @@ https://<你的设备名>.<你的tailnet名>.ts.net/
 |-- proxy http://127.0.0.1:8000
 ```
 
-按 `Control + C` 停止；脚本会关闭 8000、8001，以及本次启动时创建的 Funnel。复用已有 Funnel 时不会关闭它；若需手动清理，执行：
+按 `Control + C` 停止；脚本会关闭 8000、8001 和 Funnel。脚本每次启动前也会清理旧的 Funnel 配置；若需手动清理，执行：
 
 ```bash
 tailscale funnel reset

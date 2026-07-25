@@ -42,6 +42,13 @@ SUPERGATEWAY_PID=""
 PROXY_PID=""
 FUNNEL_STARTED=0
 
+# 每次启动都从干净的 Funnel 配置开始，避免旧的前台 listener 占用 443。
+if ! "$TAILSCALE" funnel reset >/dev/null 2>&1; then
+	echo "❌ 无法清理现有 Tailscale Funnel 配置"
+	exit 1
+fi
+FUNNEL_STARTED=1
+
 cleanup() {
 	echo ""
 	echo "关闭中…"
@@ -90,16 +97,4 @@ fi
 
 # 4. 开 Tailscale Funnel（公网入口，只指向 8000）
 echo ""
-FUNNEL_STATUS=$("$TAILSCALE" funnel status --json 2>/dev/null || true)
-if printf '%s\n' "$FUNNEL_STATUS" | grep -Fq '"Proxy": "http://127.0.0.1:8000"'; then
-	echo "✅ Funnel 已指向 8000（复用现有配置）"
-else
-	if ! "$TAILSCALE" funnel --bg 8000; then
-		echo "❌ Tailscale Funnel 已有其他监听，先执行 tailscale funnel reset 或关闭占用 443 的配置"
-		exit 1
-	fi
-	FUNNEL_STARTED=1
-fi
-
-# Funnel 使用后台配置；脚本继续驻留，直到用户中断。
-while :; do sleep 3600; done
+"$TAILSCALE" funnel 8000
