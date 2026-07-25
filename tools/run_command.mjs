@@ -15,18 +15,19 @@ export const name = "run_command"
 
 export const definition = {
 	name,
+	title: "执行命令",
 	description:
-		"Run a shell command on this Mac (executed via /bin/sh -c). Default working directory is " +
+		"在这台 Mac 上执行一条 shell 命令（通过 /bin/sh -c 执行）。默认工作目录是 " +
 		SANDBOX_DIR +
-		". This is NOT a hard sandbox \u2014 commands can still reach paths outside the working directory (absolute paths, `cd ..`, etc). Use for running python/pip, editing files, generating images/SVGs, training scripts, and any other command-line task.",
+		"。注意：这不是一个严格的沙盒环境——命令仍然可以访问工作目录之外的路径（例如绝对路径、`cd ..` 等）。可用于运行 python/pip、编辑文件、生成图片/SVG、跑训练脚本，以及其他任意命令行任务。",
 	inputSchema: {
 		type: "object",
 		properties: {
-			command: { type: "string", description: "Shell command to run." },
-			cwd: { type: "string", description: "Optional subdirectory relative to the sandbox folder." },
+			command: { type: "string", description: "要执行的 shell 命令。" },
+			cwd: { type: "string", description: "可选，相对于沙盒文件夹的子目录。" },
 			timeoutMs: {
 				type: "number",
-				description: `Optional timeout in ms (default ${DEFAULT_TIMEOUT_MS}, max ${MAX_TIMEOUT_MS}). Raise this for long-running jobs like model training.`,
+				description: `可选，超时时间（毫秒，默认 ${DEFAULT_TIMEOUT_MS}，最大 ${MAX_TIMEOUT_MS}）。执行模型训练等长耗时任务时可以调大这个值。`,
 			},
 		},
 		required: ["command"],

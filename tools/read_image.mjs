@@ -19,17 +19,18 @@ export const name = "read_image"
 
 export const definition = {
 	name,
+	title: "读取图片",
 	description:
-		"Read an image file back as viewable image content, so the calling model can actually see it (not just its raw bytes/markup). SVG files are automatically rasterized to PNG first (via macOS's built-in QuickLook), since vector markup can't be viewed directly as an image. Relative paths resolve against the sandbox folder (" +
+		"读取一个图片文件，并把它作为可查看的图像内容返回（而不只是原始字节或标记文本），这样调用方模型才能真正“看到”这张图。SVG 文件会先通过 macOS 自带的 QuickLook 自动栅格化为 PNG，因为矢量标记本身无法直接当作图像查看。相对路径会基于沙盒文件夹（" +
 		SANDBOX_DIR +
-		"); absolute paths also work.",
+		"）解析；也支持绝对路径。",
 	inputSchema: {
 		type: "object",
 		properties: {
-			path: { type: "string", description: "Path to the image file (.svg, .png, .jpg, .jpeg, .gif, .webp). Relative paths resolve against the sandbox folder." },
+			path: { type: "string", description: "图片文件的路径（.svg、.png、.jpg、.jpeg、.gif、.webp）。相对路径会基于沙盒文件夹解析。" },
 			maxSize: {
 				type: "number",
-				description: `Optional max pixel dimension when rasterizing SVGs (default ${DEFAULT_IMAGE_MAX_SIZE}, max ${MAX_IMAGE_MAX_SIZE}). Ignored for already-raster formats.`,
+				description: `可选，栅格化 SVG 时的最大像素尺寸（默认 ${DEFAULT_IMAGE_MAX_SIZE}，最大 ${MAX_IMAGE_MAX_SIZE}）。对已经是位图格式的文件无效。`,
 			},
 		},
 		required: ["path"],
