@@ -1,9 +1,6 @@
 #!/bin/bash
 # up.sh — 一键启动：exec-server（后端）+ supergateway（streamableHttp 多会话）
 #         + auth-proxy（鉴权）+ Tailscale Funnel（公网入口）
-#
-# 2026.7.26 升级：后端从官方 Filesystem MCP（只读写）换成自定义 exec-server.mjs
-# （run_command，能跑任意命令）。auth-proxy.mjs 不用改，鉴权层和协议层没变。
 set -uo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
