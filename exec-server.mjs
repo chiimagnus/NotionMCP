@@ -5,8 +5,9 @@
 // see README.md for the full file layout.
 //
 // Currently exposes:
-//   1. run_command — run arbitrary shell commands on this Mac.
-//   2. read_image  — read an image file back as viewable image content.
+//   1. run_command  — run arbitrary shell commands on this Mac.
+//   2. read_image   — read an image file back as viewable image content.
+//   3. apply_patch  — batch create/update/delete files via structured ops.
 //
 // SECURITY NOTE (read this before exposing it to the internet):
 // - This is NOT a hard sandbox. `cwd` is only a *default* working directory,
@@ -51,7 +52,7 @@ async function handleLine(line) {
 			result: {
 				protocolVersion: "2024-11-05",
 				capabilities: { tools: {} },
-				serverInfo: { name: "exec-server", version: "1.2.0" },
+				serverInfo: { name: "exec-server", version: "1.3.0" },
 			},
 		})
 		return
