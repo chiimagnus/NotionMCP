@@ -7,6 +7,7 @@
 //   1. run_command  — 在这台 Mac 上执行任意 shell 命令。
 //   2. read_image   — 读取图片文件，返回可查看的图像内容。
 //   3. apply_patch  — 通过结构化操作批量新建/修改/删除文件。
+//   4. load_skills  — 按 key 加载 codex skills 目录下某个技能的完整内容。
 //
 // 安全提示（暴露到公网之前务必先读这段）：
 // - 这不是一个严格的沙盒。`cwd` 只是*默认*工作目录，不是强制边界；
@@ -49,7 +50,7 @@ async function handleLine(line) {
 			result: {
 				protocolVersion: "2024-11-05",
 				capabilities: { tools: {} },
-				serverInfo: { name: "exec-server", version: "1.3.0" },
+				serverInfo: { name: "exec-server", version: "1.4.0" },
 			},
 		})
 		return
