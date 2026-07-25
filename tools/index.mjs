@@ -6,8 +6,9 @@
 
 import * as runCommand from "./run_command.mjs"
 import * as readImage from "./read_image.mjs"
+import * as applyPatch from "./apply_patch.mjs"
 
-const modules = [runCommand, readImage]
+const modules = [runCommand, readImage, applyPatch]
 
 export const definitions = modules.map((m) => m.definition)
 
