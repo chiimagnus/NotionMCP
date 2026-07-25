@@ -40,8 +40,6 @@ tailscale funnel 8000
 
 ## 启动
 
-### 直接运行仓库版本（推荐）
-
 仓库根目录执行：
 
 ```bash
@@ -54,24 +52,6 @@ chmod +x ./up.sh
 - 8001：`exec-server.mjs` 经 Supergateway 包装后的 Streamable HTTP；
 - 8000：只监听 `127.0.0.1` 的 Bearer Token 鉴权代理；
 - Tailscale Funnel：只指向 8000。
-
-### 安装到 `~/.mcp`
-
-如果希望固定使用 `~/.mcp/up.sh`，必须把运行文件和目录一起复制，不能只复制启动脚本：
-
-```bash
-mkdir -p "$HOME/.mcp"
-cp up.sh auth-proxy.mjs exec-server.mjs "$HOME/.mcp/"
-cp -R lib tools "$HOME/.mcp/"
-chmod +x "$HOME/.mcp/up.sh"
-"$HOME/.mcp/up.sh"
-```
-
-脚本会从自身所在目录寻找这些文件。默认沙盒路径也可以在启动时覆盖：
-
-```bash
-MCP_SANDBOX_DIR="$HOME/AI-Share" "$HOME/.mcp/up.sh"
-```
 
 看到下面几行后，保持终端运行：
 
