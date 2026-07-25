@@ -13,6 +13,4 @@
 - [Supergateway](https://github.com/supercorp-ai/supergateway)
 - [Tailscale Funnel](https://tailscale.com/kb/1223/funnel)
 - [Tailscale CLI（含 Windows）](https://tailscale.com/docs/reference/tailscale-cli)
-- [Filesystem MCP](https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem)
-- [MCP Inspector](https://modelcontextprotocol.io/docs/tools/inspector)
 - [MCP Security Best Practices](https://modelcontextprotocol.io/docs/tutorials/security/security_best_practices)
