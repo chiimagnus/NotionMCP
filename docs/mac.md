@@ -65,10 +65,10 @@ https://<你的设备名>.<你的tailnet名>.ts.net/
 |-- proxy http://127.0.0.1:8000
 ```
 
-按 `Control + C` 停止；脚本会尝试关闭 8000、8001 和 Funnel。若 Funnel 仍在运行，手动执行：
+按 `Control + C` 停止；脚本会关闭 8000、8001，以及本次启动时创建的 Funnel。复用已有 Funnel 时不会关闭它；若需手动清理，执行：
 
 ```bash
-tailscale funnel 8000 off
+tailscale funnel reset
 ```
 
 ## Notion 配置
