@@ -14,7 +14,7 @@ if [ -z "$TOKEN" ]; then
 	echo "❌ 读不到 token，先看一次性前置第 2 步"
 	exit 1
 fi
-export AUTH_TOKEN="$TOKEN"
+export MCP_TOKEN="$TOKEN"
 export MCP_SANDBOX_DIR="$SHARE_DIR"
 
 SUPERGATEWAY_PID=""
