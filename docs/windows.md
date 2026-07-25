@@ -91,20 +91,3 @@ tailscale funnel 8000
 | 鉴权方式 | **Bearer Token**（前缀选 `Bearer`，不是 `Token`） |
 | Token | `token.enc` 解密出来的裸十六进制串 |
 | 权限 | 改动前询问 or 从不询问 |
-
-## Windows 特有的已知限制 / 待验证
-
-> 🚧 下面全部**未实测**——按 macOS 版本逐行翻译工具链之后的推导，跑之前请对照实际报错调整，跑通后回来把结论转移到「已验证」。
-
-- [ ] `Start-Process -FilePath "npx.cmd"` 能否正确解析 `--stdio` 里带空格的整条命令行——PowerShell 参数转义规则和 bash 不同，很可能需要改成数组形式或改用 `cmd /c` 包一层。
-- [ ] `Test-NetConnection` 端口探测在部分精简版 Windows（Server Core）上可能不可用，需退化成裸 socket 测试。
-- [ ] Windows Defender 防火墙首次运行 `node.exe` 监听端口时通常会弹「允许专用/公用网络访问」，脚本本身不处理这个交互，需要手动点一次。
-- [ ] `finally` 块在 `Ctrl + C` 中断时是否总能执行完（PowerShell 对中断信号的处理和 bash 的 `trap EXIT` 不完全等价）；若进程没清理干净，兜底命令：
-
-```powershell
-Get-Process node, npx -ErrorAction SilentlyContinue | Stop-Process -Force
-tailscale funnel 8000 off
-```
-
-- [ ] DPAPI 加密的 `token.enc` 在「以管理员身份运行」和「普通身份运行」两种权限下是否都能正常解密（DPAPI 绑定的是用户账户而非提权状态，理论上应该都行，未验证）。
-- [ ] macOS 版本已验证的多会话并发（streamableHttp + `--stateful`）在 Windows 上是否表现一致——底层是同一个 supergateway npm 包，理论上应该一致，但未在 Windows 上重跑那两个并发 `initialize` 请求验证。
