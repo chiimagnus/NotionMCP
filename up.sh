@@ -9,6 +9,18 @@ set -uo pipefail
 SHARE_DIR="/Users/chii_magnus/Github_OpenSource/AI-Share"
 MCP_DIR="$HOME/.mcp"
 
+# tailscale 藏在 app 包里，默认不在 PATH。非交互式脚本不会继承你 ~/.zshrc 里的 alias，
+# 所以这里自己解析一次真实路径，不依赖 alias。
+if command -v tailscale >/dev/null 2>&1; then
+	TAILSCALE="tailscale"
+else
+	TAILSCALE="/Applications/Tailscale.app/Contents/MacOS/Tailscale"
+fi
+if [ ! -x "$TAILSCALE" ] && ! command -v "$TAILSCALE" >/dev/null 2>&1; then
+	echo "❌ 找不到 tailscale 可执行文件（试过 PATH 和 $TAILSCALE），确认 Tailscale.app 装在 /Applications 里"
+	exit 1
+fi
+
 TOKEN=$(security find-generic-password -a "$USER" -s mcp-token -w 2>/dev/null)
 if [ -z "$TOKEN" ]; then
 	echo "❌ 读不到 token，先看一次性前置第 2 步"
@@ -25,7 +37,7 @@ cleanup() {
 	echo "关闭中…"
 	[ -n "$SUPERGATEWAY_PID" ] && kill "$SUPERGATEWAY_PID" 2>/dev/null
 	[ -n "$PROXY_PID" ] && kill "$PROXY_PID" 2>/dev/null
-	tailscale funnel 8000 off >/dev/null 2>&1
+	"$TAILSCALE" funnel 8000 off >/dev/null 2>&1
 }
 trap cleanup EXIT INT TERM
 
@@ -68,4 +80,4 @@ fi
 
 # 4. 开 Tailscale Funnel（公网入口，只指向 8000）
 echo ""
-tailscale funnel 8000
+"$TAILSCALE" funnel 8000
