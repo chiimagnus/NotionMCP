@@ -17,7 +17,7 @@
 //   code execution on this Mac" is the bearer token checked by auth-proxy.mjs
 //   in front of this server. Keep that token secret (keychain only, never in
 //   Notion pages, repos, or chat logs).
-// - Every run_command call is appended to ~/.mcp/exec.log (timestamp +
+// - Every run_command call is appended to exec.log in this repo's root (timestamp +
 //   command + exit code) purely for your own audit/debugging. This is NOT a
 //   safety gate; it does not block or slow down execution.
 
