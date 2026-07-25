@@ -1,26 +1,23 @@
 #!/usr/bin/env node
 // exec-server.mjs
-// Zero-dependency MCP server (stdio transport). Tool implementations live in
-// ./tools/*.mjs (one file per tool) and shared helpers live in ./lib/*.mjs —
-// see README.md for the full file layout.
+// 零依赖 MCP 服务器（stdio 传输）。工具实现放在 ./tools/*.mjs（一个工具一个文件），
+// 公共辅助函数放在 ./lib/*.mjs —— 完整文件结构说明见 README.md。
 //
-// Currently exposes:
-//   1. run_command  — run arbitrary shell commands on this Mac.
-//   2. read_image   — read an image file back as viewable image content.
-//   3. apply_patch  — batch create/update/delete files via structured ops.
+// 当前暴露的工具：
+//   1. run_command  — 在这台 Mac 上执行任意 shell 命令。
+//   2. read_image   — 读取图片文件，返回可查看的图像内容。
+//   3. apply_patch  — 通过结构化操作批量新建/修改/删除文件。
 //
-// SECURITY NOTE (read this before exposing it to the internet):
-// - This is NOT a hard sandbox. `cwd` is only a *default* working directory,
-//   not an enforced boundary. A command like `cd / && rm -rf ...` or any
-//   absolute path will still execute outside the sandbox folder. Same goes
-//   for read_image's `path` — it can point anywhere on disk.
-// - The only thing standing between "anyone on the internet" and "arbitrary
-//   code execution on this Mac" is the bearer token checked by auth-proxy.mjs
-//   in front of this server. Keep that token secret (keychain only, never in
-//   Notion pages, repos, or chat logs).
-// - Every run_command call is appended to exec.log in this repo's root (timestamp +
-//   command + exit code) purely for your own audit/debugging. This is NOT a
-//   safety gate; it does not block or slow down execution.
+// 安全提示（暴露到公网之前务必先读这段）：
+// - 这不是一个严格的沙盒。`cwd` 只是*默认*工作目录，不是强制边界；
+//   类似 `cd / && rm -rf ...` 这样的命令，或任何绝对路径，仍然可以在
+//   沙盒目录之外执行。read_image 的 `path` 同理，可以指向磁盘上任意位置。
+// - “公网上的任何人”和“在这台 Mac 上任意执行代码”之间，唯一的屏障
+//   就是 auth-proxy.mjs 校验的那个 bearer token。请把它保管好（只放
+//   钥匙串，绝不要写进 Notion 页面、代码仓库或聊天记录）。
+// - 每次 run_command 调用都会追加写入仓库根目录下的 exec.log（时间戳 +
+//   命令 + 退出码），纯粹用于自己审计/排查问题，不是安全防线，不会
+//   阻止或拖慢执行。
 
 import { send } from "./lib/rpc.mjs"
 import { definitions, handlers } from "./tools/index.mjs"
