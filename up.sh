@@ -6,8 +6,20 @@
 # （run_command，能跑任意命令）。auth-proxy.mjs 不用改，鉴权层和协议层没变。
 set -uo pipefail
 
-SHARE_DIR="/Users/chii_magnus/Github_OpenSource/AI-Share"
-MCP_DIR="$HOME/.mcp"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+SHARE_DIR="${MCP_SANDBOX_DIR:-$HOME/Github_OpenSource/AI-Share}"
+MCP_DIR="$SCRIPT_DIR"
+
+for required_file in \
+	"$MCP_DIR/exec-server.mjs" \
+	"$MCP_DIR/auth-proxy.mjs" \
+	"$MCP_DIR/lib/rpc.mjs" \
+	"$MCP_DIR/tools/index.mjs"; do
+	if [ ! -f "$required_file" ]; then
+		echo "❌ 缺少运行文件：$required_file"
+		exit 1
+	fi
+done
 
 # tailscale 藏在 app 包里，默认不在 PATH。非交互式脚本不会继承你 ~/.zshrc 里的 alias，
 # 所以这里自己解析一次真实路径，不依赖 alias。
