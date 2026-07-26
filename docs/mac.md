@@ -1,6 +1,6 @@
 # macOS
 
-启动逻辑由共享的 `up.mjs` 提供，入口仍然是 `up.sh`。Linux 和 Windows 的入口见 [Linux](./linux.md) 与 [Windows](./windows.md)。
+启动逻辑由共享的 `lib/up.mjs` 提供，入口仍然是 `up.sh`。Linux 和 Windows 的入口见 [Linux](./linux.md) 与 [Windows](./windows.md)。
 
 ## 配置
 
@@ -57,7 +57,7 @@ chmod +x ./up.sh
 
 `up.sh` 会启动：
 
-- 8001：`exec-server.mjs` 经 Supergateway 包装后的 Streamable HTTP；
+- 8001：`lib/exec-server.mjs` 经 Supergateway 包装后的 Streamable HTTP；
 - 8000：只监听 `127.0.0.1` 的 Bearer Token 鉴权代理；
 - Tailscale Funnel：只指向 8000（后台运行）。
 

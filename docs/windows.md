@@ -26,7 +26,7 @@ $Token | ConvertTo-SecureString -AsPlainText -Force |
 ```
 
 `token.enc` 使用 Windows DPAPI，只能由当前 Windows 用户在当前机器上读取。Token 不要写进仓库、Notion 页面或聊天记录。
-每次启动时，`up.mjs` 还会自动移除 `.mcp` 目录和 `token.enc` 的继承权限，只保留当前用户与 `SYSTEM`；可用下面命令检查：
+每次启动时，`lib/up.mjs` 还会自动移除 `.mcp` 目录和 `token.enc` 的继承权限，只保留当前用户与 `SYSTEM`；可用下面命令检查：
 
 ```powershell
 icacls.exe (Join-Path $TokenDir "token.enc")
@@ -57,7 +57,7 @@ Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
 & .\up.ps1
 ```
 
-`up.ps1` 会调用共享的 `up.mjs`，启动 8001 的 Supergateway、8000 的 Bearer 鉴权代理，并用 Tailscale Funnel 暴露 8000。它会自动检查 MCP initialize、鉴权和 Funnel 指向；端口冲突会直接失败，不会复用旧进程假装成功。
+`up.ps1` 会调用共享的 `lib/up.mjs`，启动 8001 的 Supergateway、8000 的 Bearer 鉴权代理，并用 Tailscale Funnel 暴露 8000。它会自动检查 MCP initialize、鉴权和 Funnel 指向；端口冲突会直接失败，不会复用旧进程假装成功。
 
 保持 PowerShell 窗口运行，按 `Ctrl + C` 停止。启动成功后，Notion 的 Server URL 使用：
 
