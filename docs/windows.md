@@ -21,6 +21,14 @@ MCP_SKILLS_DIR_WINDOWS=~/.codex/skills
 
 ## 一次性准备
 
+### 0. 安装依赖
+
+```pwsh
+npm install
+```
+
+这样 supergateway 会固定版本安装在本地 `node_modules` 里，每次启动不用再联网解析版本、也不会因为 registry 抖动而变慢或失败（不执行这一步也能跑，只是会自动回退到较慢、较不稳定的 `npx -y` 拉取方式）。
+
 ### 1. 保存或更新 Token
 
 ```pwsh
@@ -70,6 +78,8 @@ Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
 ```
 
 按 `Ctrl + C` 停止。
+
+supergateway 或 auth-proxy 中途意外退出时，启动器会自动按退避策略重启，不需要手动重新执行 `up.ps1`；每 6 小时也会主动回收重启一次以避免长时间运行的会话/进程积累（可以在 `.env` 里设置 `MCP_RECYCLE_INTERVAL_MS` 调整间隔或设为 `0` 关闭）。运行过程会持久化写入仓库根目录的 `up.log`，排查问题时可以先看这个文件。
 
 ## Notion 配置
 

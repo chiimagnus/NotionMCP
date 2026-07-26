@@ -1,0 +1,13 @@
+{
+	"name": "notionmcp",
+	"version": "1.1.0",
+	"private": true,
+	"type": "module",
+	"description": "把本地文件夹通过鉴权反向代理 + Tailscale Funnel 暴露成 MCP server，供 Notion AI 使用。",
+	"scripts": {
+		"start": "node lib/up.mjs"
+	},
+	"dependencies": {
+		"supergateway": "^3.4.0"
+	}
+}
