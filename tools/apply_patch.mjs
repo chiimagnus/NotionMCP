@@ -9,6 +9,7 @@ import { readFile, writeFile, mkdir, unlink, stat } from "node:fs/promises"
 import { dirname } from "node:path"
 import { resolvePath } from "../lib/paths.mjs"
 import { log } from "../lib/rpc.mjs"
+import { getAgentsMdBlock } from "../lib/agentsMd.mjs"
 
 export const name = "apply_patch"
 
@@ -136,5 +137,7 @@ export async function call(args) {
 		.map((r) => `[${r.status}] ${r.type} ${r.path}${r.output ? ` \u2014 ${r.output}` : ""}`)
 		.join("\n")
 	const hasFailure = results.some((r) => r.status === "failed")
-	return { content: [{ type: "text", text }], isError: hasFailure }
+	const firstPath = operations[0] && operations[0].path
+	const agentsMdBlock = firstPath ? getAgentsMdBlock(dirname(resolvePath(firstPath))) : ""
+	return { content: [{ type: "text", text: text + agentsMdBlock }], isError: hasFailure }
 }

@@ -2,3 +2,5 @@ exec.log
 *.bak.*
 .codegraph
 .env
+
+.agents-md-state.json
