@@ -56,8 +56,8 @@ function runCommand({ command, cwd, timeoutMs }) {
 		let stdout = ""
 		let stderr = ""
 		let timedOut = false
-		// StringDecoder avoids corrupting multi-byte UTF-8 characters (e.g. Chinese
-		// text) that happen to be split across two separate 'data' chunks.
+		// 用 StringDecoder 做增量解码，避免多字节 UTF-8 字符（比如中文）
+		// 刚好被拆分在两个 data 分片之间时产生乱码。
 		const stdoutDecoder = new StringDecoder("utf8")
 		const stderrDecoder = new StringDecoder("utf8")
 		const timer = setTimeout(() => {
