@@ -21,14 +21,10 @@ MCP_SKILLS_DIR_WINDOWS=~/.codex/skills
 
 ## 一次性准备
 
-### 1. 保存 Token
+### 1. 保存或更新 Token
 
 ```powershell
-$TokenDir = Join-Path $env:USERPROFILE ".mcp"
-New-Item -ItemType Directory -Force -Path $TokenDir | Out-Null
-$Token = node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
-$Token | ConvertTo-SecureString -AsPlainText -Force |
-    ConvertFrom-SecureString | Set-Content (Join-Path $TokenDir "token.enc")
+$TokenDir=Join-Path $env:USERPROFILE ".mcp"; New-Item -ItemType Directory -Force -Path $TokenDir | Out-Null; $Token=node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"; $Token | ConvertTo-SecureString -AsPlainText -Force | ConvertFrom-SecureString | Set-Content (Join-Path $TokenDir "token.enc")
 ```
 
 `token.enc` 使用 Windows DPAPI，只能由当前 Windows 用户在当前机器上读取。Token 不要写进仓库、Notion 页面或聊天记录。
@@ -43,10 +39,7 @@ icacls.exe (Join-Path $TokenDir "token.enc")
 需要填入 Notion 时可临时读取裸 token（不要把输出保存进文件）：
 
 ```powershell
-$secure = Get-Content (Join-Path $env:USERPROFILE ".mcp\token.enc") | ConvertTo-SecureString
-$ptr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
-try { [Runtime.InteropServices.Marshal]::PtrToStringBSTR($ptr) }
-finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($ptr) }
+$secure=Get-Content (Join-Path $env:USERPROFILE ".mcp\token.enc") | ConvertTo-SecureString; $ptr=[Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure); try { [Runtime.InteropServices.Marshal]::PtrToStringBSTR($ptr) } finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($ptr) }
 ```
 
 这里只为填入 Notion 临时输出 token；不要把输出保存到文件或提交到仓库。
