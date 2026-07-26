@@ -1,8 +1,10 @@
 # macOS
 
+启动逻辑由共享的 `up.mjs` 提供，入口仍然是 `up.sh`。Linux 和 Windows 的入口见 [Linux](./linux.md) 与 [Windows](./windows.md)。
+
 ## 配置
 
-用户配置集中在仓库根目录的 `.env`。通常只需要修改 `MCP_SANDBOX_DIR_MACOS` 和 `MCP_SKILLS_DIR`；端口冲突时再调整两个端口。Token、钥匙串 service 和 Tailscale 路径由程序使用内置默认值处理。
+用户配置集中在仓库根目录的 `.env`。通常只需要修改 `MCP_SANDBOX_DIR_MACOS` 和 `MCP_SKILLS_DIR_MACOS`；端口冲突时再调整两个端口。Token、钥匙串 service 和 Tailscale 路径由程序使用内置默认值处理。
 
 ## 一次性准备
 
@@ -33,16 +35,16 @@ security find-generic-password -a "$USER" -s mcp-token -w
 ### 3. 首次开通 Tailscale Funnel
 
 ```bash
-tailscale funnel 8000
+tailscale funnel --bg 8000
 ```
 
 如果 CLI 不在 `PATH`：
 
 ```bash
-/Applications/Tailscale.app/Contents/MacOS/Tailscale funnel 8000
+/Applications/Tailscale.app/Contents/MacOS/Tailscale funnel --bg 8000
 ```
 
-首次运行会要求在管理后台开启 HTTPS 证书和 Funnel 权限。只允许 Funnel 指向 8000；8001 是后端端口，不能暴露到公网。`up.sh` 会自动寻找 `PATH` 或上述 App 内的 CLI，不依赖 shell alias。
+首次运行会要求在管理后台开启 HTTPS 证书和 Funnel 权限。只允许 Funnel 指向 8000；8001 是后端端口，不能暴露到公网。`up.sh` 会自动寻找 `PATH` 或上述 App 内的 CLI，不依赖 shell alias。日常启动时脚本会自动 reset 并重新建立 Funnel，不需要手动重复执行这一步。
 
 ## 启动
 
@@ -57,7 +59,7 @@ chmod +x ./up.sh
 
 - 8001：`exec-server.mjs` 经 Supergateway 包装后的 Streamable HTTP；
 - 8000：只监听 `127.0.0.1` 的 Bearer Token 鉴权代理；
-- Tailscale Funnel：只指向 8000。
+- Tailscale Funnel：只指向 8000（后台运行）。
 
 看到下面几行后，保持终端运行：
 

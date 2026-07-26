@@ -6,4 +6,8 @@
 
 ## 选平台
 
-- [macOS：当前完整可运行入口](./docs/mac.md)
+- [macOS](./docs/mac.md)
+- [Linux](./docs/linux.md)
+- [Windows](./docs/windows.md)
+
+三个平台共用同一个 Node 启动器和工具集；入口分别是 `up.sh`（macOS/Linux）与 `up.ps1`（Windows）。

@@ -1,7 +1,7 @@
 // tools/read_image.mjs
 // The `read_image` tool: read an image file back as viewable image content
 // (base64) so the calling model can actually see it. SVGs are rasterized to
-// PNG first via macOS's built-in QuickLook (qlmanage).
+// PNG first via a platform-native rasterizer.
 
 import { spawn } from "node:child_process"
 import { readFile, mkdtemp, rm } from "node:fs/promises"
@@ -21,7 +21,7 @@ export const definition = {
 	name,
 	title: "读取图片",
 	description:
-		"读取一个图片文件，并把它作为可查看的图像内容返回（而不只是原始字节或标记文本），这样调用方模型才能真正“看到”这张图。SVG 文件会先通过 macOS 自带的 QuickLook 自动栅格化为 PNG，因为矢量标记本身无法直接当作图像查看。相对路径会基于沙盒文件夹（" +
+		"读取一个图片文件，并把它作为可查看的图像内容返回（而不只是原始字节或标记文本），这样调用方模型才能真正“看到”这张图。SVG 文件会先通过平台上的栅格化工具转成 PNG：macOS 使用 qlmanage，Linux/Windows 使用 ImageMagick（magick）或 rsvg-convert。相对路径会基于沙盒文件夹（" +
 		SANDBOX_DIR +
 		"）解析；也支持绝对路径。",
 	inputSchema: {
@@ -37,35 +37,58 @@ export const definition = {
 	},
 }
 
-function rasterizeSvgToPng(svgPath, maxSize) {
-	return new Promise(async (resolve, reject) => {
-		let outDir
+function runRasterizer(command, args) {
+	return new Promise((resolve) => {
+		let settled = false
+		let stderr = ""
+		const finish = (result) => {
+			if (settled) return
+			settled = true
+			resolve(result)
+		}
+		let child
 		try {
-			outDir = await mkdtemp(join(tmpdir(), "svg-thumb-"))
+			child = spawn(command, args)
 		} catch (err) {
-			reject(err)
+			finish({ code: -1, stderr: String(err) })
 			return
 		}
-		const child = spawn("qlmanage", ["-t", "-s", String(maxSize), "-o", outDir, svgPath])
-		let stderr = ""
 		child.stderr.on("data", (d) => (stderr += d))
-		child.on("error", (err) => reject(err))
-		child.on("close", async (code) => {
-			if (code !== 0) {
-				reject(new Error(`qlmanage exited ${code}: ${stderr}`))
-				return
+		child.on("error", (err) => finish({ code: -1, stderr: String(err) }))
+		child.on("close", (code) => finish({ code, stderr }))
+	})
+}
+
+async function rasterizeSvgToPng(svgPath, maxSize) {
+	const outDir = await mkdtemp(join(tmpdir(), "svg-thumb-"))
+	const pngPath = join(outDir, `${basename(svgPath)}.png`)
+	const resize = `${maxSize}x${maxSize}>`
+	const candidates =
+		process.platform === "darwin"
+			? [["qlmanage", ["-t", "-s", String(maxSize), "-o", outDir, svgPath]]]
+			: [
+				["magick", [svgPath, "-resize", resize, pngPath]],
+				["convert", [svgPath, "-resize", resize, pngPath]],
+				["rsvg-convert", ["--width", String(maxSize), "--output", pngPath, svgPath]],
+			]
+	const errors = []
+	try {
+		for (const [command, args] of candidates) {
+			const result = await runRasterizer(command, args)
+			if (result.code !== 0) {
+				errors.push(`${command}: ${result.stderr.trim() || `exit ${result.code}`}`)
+				continue
 			}
 			try {
-				const pngPath = join(outDir, `${basename(svgPath)}.png`)
-				const buf = await readFile(pngPath)
-				resolve(buf)
+				return await readFile(pngPath)
 			} catch (err) {
-				reject(err)
-			} finally {
-				rm(outDir, { recursive: true, force: true }).catch(() => {})
+				errors.push(`${command}: 输出 PNG 不存在（${err.message}）`)
 			}
-		})
-	})
+		}
+		throw new Error(`SVG 栅格化失败，请安装 ImageMagick 或 librsvg：${errors.join("；")}`)
+	} finally {
+		await rm(outDir, { recursive: true, force: true }).catch(() => {})
+	}
 }
 
 async function readImage({ path, maxSize }) {
