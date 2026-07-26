@@ -1,4 +1,6 @@
 exec.log
+up.log
+node_modules/
 *.bak.*
 .codegraph
 .env

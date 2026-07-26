@@ -15,7 +15,11 @@ import { log, truncate } from "../lib/rpc.mjs"
 import { resolvePath } from "../lib/paths.mjs"
 import { getAgentsMdBlock } from "../lib/agentsMd.mjs"
 
-// ponytail: 在模块加载时解析一次，先查 PATH，再查 PowerShell 7 MSI 的固定安装目录。
+// ponytail: 查一次 pwsh.exe 的位置：先查 PATH，再查 PowerShell 7 MSI 的固定安装目录。
+// 这个函数本身只做“查找”，不在模块加载时（import 阶段）调用——找不到 pwsh 时
+// 只应该让 run_command 这一次调用报错，不应该炸掉整个 exec-server 进程，否则
+// read_image / apply_patch / load_skills 这三个跟 pwsh 毫无关系的工具也会全部
+// 跟着不可用。
 function resolveWindowsShell() {
 	const candidates = (process.env.PATH || "")
 		.split(delimiter)
@@ -25,10 +29,30 @@ function resolveWindowsShell() {
 	for (const candidate of candidates) {
 		if (existsSync(candidate)) return { path: candidate, label: "PowerShell 7" }
 	}
-	throw new Error("Windows requires PowerShell 7 (pwsh.exe)")
+	throw new Error("Windows requires PowerShell 7 (pwsh.exe); install it and retry the command")
 }
 
-const SHELL = process.platform === "win32" ? resolveWindowsShell() : { path: "/bin/sh", label: "/bin/sh" }
+let cachedShell = null
+
+// 懒解析 + 缓存：第一次成功后复用结果；找不到时每次调用都重新尝试（用户可能
+// 在两次调用之间装好了 PowerShell 7），但绝不抛出到调用方之外。
+function getShell() {
+	if (process.platform !== "win32") return { path: "/bin/sh", label: "/bin/sh" }
+	if (cachedShell) return cachedShell
+	cachedShell = resolveWindowsShell()
+	return cachedShell
+}
+
+function describeShellForHumans() {
+	if (process.platform !== "win32") return "/bin/sh"
+	try {
+		return resolveWindowsShell().label
+	} catch {
+		return "PowerShell 7（当前未检测到，调用 run_command 时会报错，不影响其他工具）"
+	}
+}
+
+const SHELL_LABEL = describeShellForHumans()
 
 export const name = "run_command"
 
@@ -36,7 +60,7 @@ export const definition = {
 	name,
 	title: "执行命令",
 	description:
-		`在这台机器上通过 ${SHELL.label} 执行一条命令。默认工作目录是 ` +
+		`在这台机器上通过 ${SHELL_LABEL} 执行一条命令。默认工作目录是 ` +
 		SANDBOX_DIR +
 		"。注意：这不是一个严格的沙盒环境——命令仍然可以访问工作目录之外的路径（例如绝对路径、切换目录等）。可用于运行 python/pip、编辑文件、生成图片/SVG、跑训练脚本，以及其他任意命令行任务。",
 	inputSchema: {
@@ -59,11 +83,17 @@ function runCommand({ command, cwd, timeoutMs }) {
 			resolve({ code: -1, stdout: "", stderr: "Missing required 'command' string", timedOut: false })
 			return
 		}
+		let shell
+		try {
+			shell = getShell()
+		} catch (err) {
+			resolve({ code: -1, stdout: "", stderr: String(err.message || err), timedOut: false })
+			return
+		}
 		const workDir = cwd ? resolvePath(cwd) : SANDBOX_DIR
 		const timeout = Math.min(Number(timeoutMs) || DEFAULT_TIMEOUT_MS, MAX_TIMEOUT_MS)
 		let child
 		try {
-			const shell = SHELL.path
 			const winCommand =
 				process.platform === "win32"
 					? `[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); $OutputEncoding = [Console]::OutputEncoding; $PSDefaultParameterValues['*:Encoding'] = 'utf8'; ${command}`
@@ -71,7 +101,7 @@ function runCommand({ command, cwd, timeoutMs }) {
 			const args = process.platform === "win32" ? ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", winCommand] : ["-c", command]
 			// ponytail: 同一类编码问题的另一半——Python 在 ACP=936 的机器上往管道打印中文会直接
 			// 抛 UnicodeEncodeError，这两个环境变量一次性免掉，比每条命令自己 set 靠得住。
-			child = spawn(shell, args, { cwd: workDir, env: { ...process.env, PYTHONUTF8: "1", PYTHONIOENCODING: "utf-8" } })
+			child = spawn(shell.path, args, { cwd: workDir, env: { ...process.env, PYTHONUTF8: "1", PYTHONIOENCODING: "utf-8" } })
 		} catch (err) {
 			resolve({ code: -1, stdout: "", stderr: String(err), timedOut: false })
 			return
