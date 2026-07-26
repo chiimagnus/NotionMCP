@@ -13,11 +13,9 @@ MCP_SKILLS_DIR_LINUX=~/.codex/skills
 
 ## 一次性准备
 
-```bash
-SHARE_DIR="$HOME/AI-Share"
-mkdir -p "$SHARE_DIR"
-printf 'MCP connection test\n' > "$SHARE_DIR/connection-test.txt"
+首次启动时，脚本会自动创建 `.env` 中 `MCP_SANDBOX_DIR_LINUX` 指定的目录。以后只把愿意交给 AI 的文件放这里；`MCP_SANDBOX_DIR` 只是默认工作目录，不是严格沙盒。
 
+```bash
 mkdir -p "$HOME/.mcp"
 umask 077
 openssl rand -hex 32 > "$HOME/.mcp/token"
@@ -45,4 +43,4 @@ https://<你的设备名>.<你的tailnet名>.ts.net/mcp
 
 ## 工具差异
 
-`run_command` 使用 `/bin/sh`；`read_image` 支持常见位图，SVG 需要 ImageMagick 或 librsvg。`MCP_SANDBOX_DIR` 只是默认工作目录，不是严格沙盒。
+`run_command` 使用 `/bin/sh`；`read_image` 支持常见位图，SVG 需要 ImageMagick 或 librsvg。

@@ -8,21 +8,11 @@
 
 ## 一次性准备
 
-### 1. 建沙盒目录
-
-默认目录由 `.env` 的 `MCP_SANDBOX_DIR_MACOS` 设置：
-
-```bash
-SHARE_DIR="$HOME/Github_OpenSource/AI-Share"
-mkdir -p "$SHARE_DIR"
-printf 'MCP connection test\n' > "$SHARE_DIR/connection-test.txt"
-```
-
-临时运行时仍可以用环境变量 `MCP_SANDBOX_DIR` 覆盖它。
+首次启动时，脚本会自动创建 `.env` 中 `MCP_SANDBOX_DIR_MACOS` 指定的目录。临时运行时仍可以用环境变量 `MCP_SANDBOX_DIR` 覆盖它。
 
 以后只把愿意交给 AI 的文件放这里。这个目录只是命令的默认工作目录，不是严格沙盒；`run_command` 仍可访问绝对路径或通过 `cd` 离开它。
 
-### 2. 把 Token 存进钥匙串
+### 1. 把 Token 存进钥匙串
 
 ```bash
 openssl rand -hex 32
@@ -32,7 +22,7 @@ security find-generic-password -a "$USER" -s mcp-token -w
 
 第一次读取时点钥匙串弹窗里的「始终允许」。Token 不要写进仓库、Notion 页面或聊天记录。
 
-### 3. 首次开通 Tailscale Funnel
+### 2. 首次开通 Tailscale Funnel
 
 ```bash
 tailscale funnel --bg 8000
