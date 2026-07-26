@@ -33,7 +33,7 @@ chmod +x ./up.sh
 ./up.sh
 ```
 
-`up.sh` 会启动 8001 的 Supergateway、8000 的 Bearer 鉴权代理，并用 Tailscale Funnel 暴露 8000。它会自动检查 MCP initialize、鉴权和 Funnel 指向；端口冲突会直接失败，不会复用旧进程假装成功。
+`up.sh` 会调用共享的 `lib/up.mjs`，启动 8001 的 Supergateway、8000 的 Bearer 鉴权代理，并用 Tailscale Funnel 暴露 8000。它会自动检查 MCP initialize、鉴权和 Funnel 指向；端口冲突会直接失败，不会复用旧进程假装成功。
 
 保持终端运行，按 `Ctrl + C` 停止。启动成功后，Notion 的 Server URL 使用：
 
