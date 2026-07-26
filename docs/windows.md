@@ -2,6 +2,8 @@
 
 > Windows 现在有 `up.ps1` 入口，但它仍使用官方 Filesystem MCP；macOS 的 `up.sh` 使用自定义 `exec-server.mjs`，两者工具能力不完全一致。PowerShell 版本尚未在真实 Windows 环境完成验证。
 
+启动配置集中在 `.env`。修改 `MCP_SANDBOX_DIR_WINDOWS`、端口、超时或 `MCP_TAILSCALE_PATH_WINDOWS` 即可；Token 仍只放在 DPAPI 文件中。
+
 ## 日常使用
 
 脚本安装到用户目录后运行：
@@ -22,7 +24,7 @@ New-Item -ItemType Directory -Force -Path $ShareDir | Out-Null
 "MCP connection test" | Out-File -Encoding utf8 "$ShareDir\connection-test.txt"
 ```
 
-`up.ps1` 当前固定使用这个目录作为 Filesystem MCP 的允许目录。
+`up.ps1` 使用这个目录作为 Filesystem MCP 的允许目录。
 
 ### 2. 把 Token 存成 DPAPI 文件
 
@@ -47,10 +49,11 @@ DPAPI 文件只绑定当前 Windows 用户和机器。Token 不要写进仓库�
 在仓库根目录执行：
 
 ```powershell
-Copy-Item .\up.ps1, .\auth-proxy.mjs "$env:USERPROFILE\.mcp\"
+Copy-Item .\up.ps1, .\auth-proxy.mjs, .\.env "$env:USERPROFILE\.mcp\"
+Copy-Item .\lib "$env:USERPROFILE\.mcp\" -Recurse -Force
 ```
 
-`up.ps1` 会从 `~\.mcp\auth-proxy.mjs` 启动代理；Windows 版本当前不需要复制 macOS 的 `exec-server.mjs`、`lib` 或 `tools`。
+`up.ps1` 会从自身目录启动代理，并读取同目录的 `.env` 和 `lib/config.mjs`；Windows 版本当前不需要复制 macOS 的 `exec-server.mjs` 或 `tools`。
 
 ### 4. 首次开通 Tailscale Funnel
 
@@ -58,7 +61,7 @@ Copy-Item .\up.ps1, .\auth-proxy.mjs "$env:USERPROFILE\.mcp\"
 tailscale funnel 8000
 ```
 
-如果 `tailscale` 不在 `PATH`，使用安装目录中的 `tailscale.exe`。首次运行需要在管理后台开启 HTTPS 证书和 Funnel 权限。只能指向 8000，不能暴露 8001。
+如果 `tailscale` 不在 `PATH`，把安装目录中的 `tailscale.exe` 路径写入 `.env` 的 `MCP_TAILSCALE_PATH_WINDOWS`。首次运行需要在管理后台开启 HTTPS 证书和 Funnel 权限。只能指向代理端口，不能暴露后端端口。
 
 ### 5. 启动
 

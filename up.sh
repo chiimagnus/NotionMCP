@@ -4,8 +4,33 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-SHARE_DIR="${MCP_SANDBOX_DIR:-$HOME/Github_OpenSource/AI-Share}"
 MCP_DIR="$SCRIPT_DIR"
+CONFIG_FILE="${MCP_CONFIG_FILE:-$MCP_DIR/.env}"
+
+if [ ! -f "$CONFIG_FILE" ]; then
+	echo "❌ 找不到配置文件：$CONFIG_FILE"
+	exit 1
+fi
+export MCP_CONFIG_FILE="$CONFIG_FILE"
+
+CONFIG_OUTPUT=$(node "$MCP_DIR/lib/config.mjs" --lines macos) || {
+	echo "❌ 配置读取失败"
+	exit 1
+}
+CONFIG_VALUES=()
+while IFS= read -r line; do
+	CONFIG_VALUES[${#CONFIG_VALUES[@]}]="$line"
+done <<< "$CONFIG_OUTPUT"
+if [ "${#CONFIG_VALUES[@]}" -ne 6 ]; then
+	echo "❌ 配置读取结果不完整"
+	exit 1
+fi
+SHARE_DIR="${CONFIG_VALUES[0]}"
+PROXY_PORT="${CONFIG_VALUES[1]}"
+UPSTREAM_PORT="${CONFIG_VALUES[2]}"
+SESSION_TIMEOUT_MS="${CONFIG_VALUES[3]}"
+TOKEN_SERVICE="${CONFIG_VALUES[4]}"
+TAILSCALE_CONFIGURED="${CONFIG_VALUES[5]}"
 
 for required_file in \
 	"$MCP_DIR/exec-server.mjs" \
@@ -23,14 +48,14 @@ done
 if command -v tailscale >/dev/null 2>&1; then
 	TAILSCALE="tailscale"
 else
-	TAILSCALE="/Applications/Tailscale.app/Contents/MacOS/Tailscale"
+	TAILSCALE="$TAILSCALE_CONFIGURED"
 fi
 if [ ! -x "$TAILSCALE" ] && ! command -v "$TAILSCALE" >/dev/null 2>&1; then
 	echo "❌ 找不到 tailscale 可执行文件（试过 PATH 和 $TAILSCALE），确认 Tailscale.app 装在 /Applications 里"
 	exit 1
 fi
 
-TOKEN=$(security find-generic-password -a "$USER" -s mcp-token -w 2>/dev/null)
+TOKEN=$(security find-generic-password -a "$USER" -s "$TOKEN_SERVICE" -w 2>/dev/null)
 if [ -z "$TOKEN" ]; then
 	echo "❌ 读不到 token，先看一次性前置第 2 步"
 	exit 1
@@ -60,18 +85,18 @@ trap cleanup EXIT INT TERM
 
 # 1. 起后端 exec-server，supergateway 包成 streamableHttp，多会话（每个 session 独立子进程）
 npx -y supergateway \
-	--stdio "node $MCP_DIR/exec-server.mjs" \
+	--stdio "node \"$MCP_DIR/exec-server.mjs\"" \
 	--outputTransport streamableHttp \
-	--port 8001 \
+	--port "$UPSTREAM_PORT" \
 	--stateful \
-	--sessionTimeout 3600000 &
+	--sessionTimeout "$SESSION_TIMEOUT_MS" &
 SUPERGATEWAY_PID=$!
 
 sleep 2
-if lsof -i :8001 >/dev/null 2>&1; then
-	echo "✅ 8001 起来了"
+if lsof -i ":$UPSTREAM_PORT" >/dev/null 2>&1; then
+	echo "✅ $UPSTREAM_PORT 起来了"
 else
-	echo "❌ 8001 没起来，看上面 supergateway 的报错"
+	echo "❌ $UPSTREAM_PORT 没起来，看上面 supergateway 的报错"
 	exit 1
 fi
 
@@ -80,15 +105,15 @@ node "$MCP_DIR/auth-proxy.mjs" &
 PROXY_PID=$!
 
 sleep 1
-if lsof -i :8000 >/dev/null 2>&1; then
-	echo "✅ 8000 起来了"
+if lsof -i ":$PROXY_PORT" >/dev/null 2>&1; then
+	echo "✅ $PROXY_PORT 起来了"
 else
-	echo "❌ 8000 没起来，看上面 auth-proxy 的报错"
+	echo "❌ $PROXY_PORT 没起来，看上面 auth-proxy 的报错"
 	exit 1
 fi
 
 # 3. 验证鉴权：不带 token 应该 401
-STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8000/mcp)
+STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:$PROXY_PORT/mcp")
 if [ "$STATUS" = "401" ]; then
 	echo "✅ 鉴权生效（无 token → 401）"
 else
@@ -97,4 +122,4 @@ fi
 
 # 4. 开 Tailscale Funnel（公网入口，只指向 8000）
 echo ""
-"$TAILSCALE" funnel 8000
+"$TAILSCALE" funnel "$PROXY_PORT"
