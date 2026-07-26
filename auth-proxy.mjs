@@ -1,8 +1,7 @@
 import http from "node:http"
+import { PROXY_PORT, UPSTREAM_PORT } from "./lib/config.mjs"
 
 const TOKEN = process.env.MCP_TOKEN
-const UPSTREAM_PORT = 8001
-const LISTEN_PORT = 8000
 
 if (!TOKEN) {
 	console.error("MCP_TOKEN 未设置，拒绝启动")
@@ -39,6 +38,6 @@ http
 
 		req.pipe(proxyReq)
 	})
-	.listen(LISTEN_PORT, "127.0.0.1", () => {
-		console.log(`auth proxy on 127.0.0.1:${LISTEN_PORT}`)
+	.listen(PROXY_PORT, "127.0.0.1", () => {
+		console.log(`auth proxy on 127.0.0.1:${PROXY_PORT}`)
 	})

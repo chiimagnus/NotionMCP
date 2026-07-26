@@ -1,16 +1,22 @@
 # macOS
 
+## 配置
+
+启动参数集中在仓库根目录的 `.env`。通常只需要修改 `MCP_SANDBOX_DIR_MACOS`；端口、超时、技能目录和 Tailscale 路径也可以在这里调整。不要把 `MCP_TOKEN` 写进这个文件。
+
 ## 一次性准备
 
 ### 1. 建沙盒目录
 
-默认目录是 `~/Github_OpenSource/AI-Share`，也可以通过 `MCP_SANDBOX_DIR` 覆盖：
+默认目录由 `.env` 的 `MCP_SANDBOX_DIR_MACOS` 设置：
 
 ```bash
-SHARE_DIR="${MCP_SANDBOX_DIR:-$HOME/Github_OpenSource/AI-Share}"
+SHARE_DIR="$HOME/Github_OpenSource/AI-Share"
 mkdir -p "$SHARE_DIR"
 printf 'MCP connection test\n' > "$SHARE_DIR/connection-test.txt"
 ```
+
+临时运行时仍可以用环境变量 `MCP_SANDBOX_DIR` 覆盖它。
 
 以后只把愿意交给 AI 的文件放这里。这个目录只是命令的默认工作目录，不是严格沙盒；`run_command` 仍可访问绝对路径或通过 `cd` 离开它。
 
