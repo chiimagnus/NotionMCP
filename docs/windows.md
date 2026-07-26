@@ -2,7 +2,7 @@
 
 ## 前置条件
 
-安装 Node.js、Tailscale CLI 和 PowerShell。SVG 图片需要额外安装 ImageMagick（`magick`），位图图片不需要额外依赖。
+安装 Node.js、PowerShell 7、Tailscale CLI。SVG 图片需要额外安装 ImageMagick（`magick`），位图图片不需要额外依赖。
 
 ## 配置
 
@@ -44,7 +44,7 @@ $secure=Get-Content (Join-Path $env:USERPROFILE ".mcp\token.enc") | ConvertTo-Se
 
 这里只为填入 Notion 临时输出 token；不要把输出保存到文件或提交到仓库。
 
-如果 PowerShell 禁止执行脚本，先执行：
+如果 PowerShell 7 禁止执行脚本，先执行：
 
 ```powershell
 Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
@@ -52,7 +52,7 @@ Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
 
 ## 启动
 
-在仓库根目录打开 PowerShell，执行：
+在仓库根目录打开 PowerShell 7（`pwsh`），执行：
 
 ```powershell
 & .\up.ps1
