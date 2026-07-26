@@ -1,5 +1,5 @@
 // tools/run_command.mjs
-// The `run_command` tool: run an arbitrary shell command on this Mac.
+// The `run_command` tool: run an arbitrary command in the local platform shell.
 //
 // SECURITY NOTE: this is NOT a hard sandbox. `cwd` is only a *default*
 // working directory, not an enforced boundary. Absolute paths, `cd ..`, etc.
@@ -17,9 +17,9 @@ export const definition = {
 	name,
 	title: "执行命令",
 	description:
-		"在这台 Mac 上执行一条 shell 命令（通过 /bin/sh -c 执行）。默认工作目录是 " +
+		`在这台机器上通过 ${process.platform === "win32" ? "PowerShell" : "/bin/sh"} 执行一条命令。默认工作目录是 ` +
 		SANDBOX_DIR +
-		"。注意：这不是一个严格的沙盒环境——命令仍然可以访问工作目录之外的路径（例如绝对路径、`cd ..` 等）。可用于运行 python/pip、编辑文件、生成图片/SVG、跑训练脚本，以及其他任意命令行任务。",
+		"。注意：这不是一个严格的沙盒环境——命令仍然可以访问工作目录之外的路径（例如绝对路径、切换目录等）。可用于运行 python/pip、编辑文件、生成图片/SVG、跑训练脚本，以及其他任意命令行任务。",
 	inputSchema: {
 		type: "object",
 		properties: {
@@ -44,7 +44,9 @@ function runCommand({ command, cwd, timeoutMs }) {
 		const timeout = Math.min(Number(timeoutMs) || DEFAULT_TIMEOUT_MS, MAX_TIMEOUT_MS)
 		let child
 		try {
-			child = spawn("/bin/sh", ["-c", command], { cwd: workDir, env: process.env })
+			const shell = process.platform === "win32" ? "powershell.exe" : "/bin/sh"
+			const args = process.platform === "win32" ? ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command] : ["-c", command]
+			child = spawn(shell, args, { cwd: workDir, env: process.env })
 		} catch (err) {
 			resolve({ code: -1, stdout: "", stderr: String(err), timedOut: false })
 			return
