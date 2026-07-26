@@ -47,7 +47,14 @@ function runCommand({ command, cwd, timeoutMs }) {
 		let child
 		try {
 			const shell = process.platform === "win32" ? "powershell.exe" : "/bin/sh"
-			const args = process.platform === "win32" ? ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command] : ["-c", command]
+			// Windows PowerShell 5.1 非交互模式下默认按系统 ANSI 代码页（如 936/GBK）编码输出，
+			// 而我们这边用 StringDecoder("utf8") 硬解，导致中文等多字节字符乱码。这里强制该子
+			// 进程的控制台输出、以及发给原生程序的编码都用 UTF-8，从根上解决乱码问题。
+			const winCommand =
+				process.platform === "win32"
+					? `[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; $OutputEncoding = [System.Text.Encoding]::UTF8; ${command}`
+					: command
+			const args = process.platform === "win32" ? ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", winCommand] : ["-c", command]
 			child = spawn(shell, args, { cwd: workDir, env: process.env })
 		} catch (err) {
 			resolve({ code: -1, stdout: "", stderr: String(err), timedOut: false })
