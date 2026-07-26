@@ -26,6 +26,13 @@ $Token | ConvertTo-SecureString -AsPlainText -Force |
 ```
 
 `token.enc` 使用 Windows DPAPI，只能由当前 Windows 用户在当前机器上读取。Token 不要写进仓库、Notion 页面或聊天记录。
+每次启动时，`up.mjs` 还会自动移除 `.mcp` 目录和 `token.enc` 的继承权限，只保留当前用户与 `SYSTEM`；可用下面命令检查：
+
+```powershell
+icacls.exe (Join-Path $TokenDir "token.enc")
+```
+
+日常不要用 Administrator 运行服务，并建议开启 BitLocker。DPAPI 和 ACL 保护磁盘上的文件，但不能阻止已经以当前用户身份运行的恶意程序读取启动器解出的 token。
 
 需要填入 Notion 时可临时读取裸 token（不要把输出保存进文件）：
 

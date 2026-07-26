@@ -4,7 +4,7 @@ import { readFileSync, statSync } from "node:fs"
 import { spawn, spawnSync } from "node:child_process"
 import { request } from "node:http"
 import { createConnection } from "node:net"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 
 import { getLauncherConfig, MCP_ROOT } from "./lib/config.mjs"
 
@@ -27,6 +27,32 @@ let cleaned = false
 
 function sleep(ms) {
 	return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function hardenWindowsTokenFile() {
+	let identity
+	try {
+		const result = spawnSync("whoami.exe", [], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] })
+		if (result.status !== 0 || !result.stdout.trim()) throw new Error(result.stderr.trim() || "whoami.exe failed")
+		identity = result.stdout.trim()
+	} catch (err) {
+		throw new Error(`无法确定当前 Windows 用户，不能收紧 token ACL：${err.message}`)
+	}
+
+	const targets = [
+		[dirname(config.tokenFile), [`${identity}:(OI)(CI)(F)`, "SYSTEM:(OI)(CI)(F)"]],
+		[config.tokenFile, [`${identity}:(F)`, "SYSTEM:(F)"]],
+	]
+	for (const [target, grants] of targets) {
+		const result = spawnSync("icacls.exe", [target, "/inheritance:r", "/grant:r", ...grants], {
+			encoding: "utf8",
+			stdio: ["ignore", "pipe", "pipe"],
+		})
+		if (result.status !== 0) {
+			const detail = (result.stderr || result.stdout || "").trim()
+			throw new Error(`无法收紧 Windows token ACL：${target}${detail ? `（${detail}）` : ""}`)
+		}
+	}
 }
 
 function readToken() {
@@ -57,6 +83,7 @@ function readToken() {
 		throw new Error(`Linux token 文件为空：${config.tokenFile}`)
 	}
 
+	hardenWindowsTokenFile()
 	const script = [
 		"$secure = Get-Content -LiteralPath $env:MCP_TOKEN_FILE | ConvertTo-SecureString",
 		"$ptr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)",
