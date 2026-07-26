@@ -2,7 +2,7 @@
 
 ## 配置
 
-启动参数集中在仓库根目录的 `.env`。通常只需要修改 `MCP_SANDBOX_DIR_MACOS`；端口、超时、技能目录和 Tailscale 路径也可以在这里调整。不要把 `MCP_TOKEN` 写进这个文件。
+用户配置集中在仓库根目录的 `.env`。通常只需要修改 `MCP_SANDBOX_DIR_MACOS` 和 `MCP_SKILLS_DIR`；端口冲突时再调整两个端口。Token、钥匙串 service 和 Tailscale 路径由程序使用内置默认值处理。
 
 ## 一次性准备
 
