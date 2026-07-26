@@ -8,7 +8,7 @@
 
 在仓库根目录执行：
 
-```powershell
+```pwsh
 Copy-Item .env.example .env
 ```
 
@@ -23,14 +23,14 @@ MCP_SKILLS_DIR_WINDOWS=~/.codex/skills
 
 ### 1. 保存或更新 Token
 
-```powershell
+```pwsh
 $TokenDir=Join-Path $env:USERPROFILE ".mcp"; New-Item -ItemType Directory -Force -Path $TokenDir | Out-Null; $Token=node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"; $Token | ConvertTo-SecureString -AsPlainText -Force | ConvertFrom-SecureString | Set-Content (Join-Path $TokenDir "token.enc")
 ```
 
 `token.enc` 使用 Windows DPAPI，只能由当前 Windows 用户在当前机器上读取。Token 不要写进仓库、Notion 页面或聊天记录。
 可用下面命令检查 token 文件权限：
 
-```powershell
+```pwsh
 icacls.exe (Join-Path $TokenDir "token.enc")
 ```
 
@@ -38,7 +38,7 @@ icacls.exe (Join-Path $TokenDir "token.enc")
 
 需要填入 Notion 时可临时读取裸 token（不要把输出保存进文件）：
 
-```powershell
+```pwsh
 $secure=Get-Content (Join-Path $env:USERPROFILE ".mcp\token.enc") | ConvertTo-SecureString; $ptr=[Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure); try { [Runtime.InteropServices.Marshal]::PtrToStringBSTR($ptr) } finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($ptr) }
 ```
 
@@ -46,7 +46,7 @@ $secure=Get-Content (Join-Path $env:USERPROFILE ".mcp\token.enc") | ConvertTo-Se
 
 如果 PowerShell 7 禁止执行脚本，先执行：
 
-```powershell
+```pwsh
 Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
 ```
 
@@ -54,13 +54,13 @@ Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
 
 在仓库根目录打开 PowerShell 7（`pwsh`），执行：
 
-```powershell
+```pwsh
 & .\up.ps1
 ```
 
 首次使用 Tailscale 时，在管理后台开启 HTTPS 证书和 Funnel 权限。不要暴露 8001。
 
-看到下面的成功提示后，保持 PowerShell 窗口运行：
+看到下面的成功提示后，保持 PowerShell 7 窗口运行：
 
 ```text
 ✅ 8001 起来了
