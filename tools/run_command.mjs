@@ -7,9 +7,11 @@
 // token checked by auth-proxy.mjs in front of this server.
 
 import { spawn } from "node:child_process"
-import { join } from "node:path"
+import { StringDecoder } from "node:string_decoder"
 import { SANDBOX_DIR, DEFAULT_TIMEOUT_MS, MAX_TIMEOUT_MS } from "../lib/config.mjs"
 import { log, truncate } from "../lib/rpc.mjs"
+import { resolvePath } from "../lib/paths.mjs"
+import { getAgentsMdBlock } from "../lib/agentsMd.mjs"
 
 export const name = "run_command"
 
@@ -40,7 +42,7 @@ function runCommand({ command, cwd, timeoutMs }) {
 			resolve({ code: -1, stdout: "", stderr: "Missing required 'command' string", timedOut: false })
 			return
 		}
-		const workDir = cwd ? join(SANDBOX_DIR, cwd) : SANDBOX_DIR
+		const workDir = cwd ? resolvePath(cwd) : SANDBOX_DIR
 		const timeout = Math.min(Number(timeoutMs) || DEFAULT_TIMEOUT_MS, MAX_TIMEOUT_MS)
 		let child
 		try {
@@ -54,14 +56,20 @@ function runCommand({ command, cwd, timeoutMs }) {
 		let stdout = ""
 		let stderr = ""
 		let timedOut = false
+		// 用 StringDecoder 做增量解码，避免多字节 UTF-8 字符（比如中文）
+		// 刚好被拆分在两个 data 分片之间时产生乱码。
+		const stdoutDecoder = new StringDecoder("utf8")
+		const stderrDecoder = new StringDecoder("utf8")
 		const timer = setTimeout(() => {
 			timedOut = true
 			child.kill("SIGKILL")
 		}, timeout)
-		child.stdout.on("data", (d) => (stdout += d))
-		child.stderr.on("data", (d) => (stderr += d))
+		child.stdout.on("data", (d) => (stdout += stdoutDecoder.write(d)))
+		child.stderr.on("data", (d) => (stderr += stderrDecoder.write(d)))
 		child.on("close", (code) => {
 			clearTimeout(timer)
+			stdout += stdoutDecoder.end()
+			stderr += stderrDecoder.end()
 			log(`cmd=${JSON.stringify(command)} cwd=${JSON.stringify(workDir)} exit=${code} timedOut=${timedOut}`)
 			resolve({ code, stdout: truncate(stdout), stderr: truncate(stderr), timedOut })
 		})
@@ -73,7 +81,10 @@ function runCommand({ command, cwd, timeoutMs }) {
 }
 
 export async function call(args) {
+	const cwdArg = args && args.cwd
+	const workDir = cwdArg ? resolvePath(cwdArg) : SANDBOX_DIR
 	const result = await runCommand(args || {})
-	const text = `exit code: ${result.code}${result.timedOut ? " (timed out, process killed)" : ""}\n\n--- stdout ---\n${result.stdout}\n\n--- stderr ---\n${result.stderr}`
+	const agentsMdBlock = getAgentsMdBlock(workDir)
+	const text = `exit code: ${result.code}${result.timedOut ? " (timed out, process killed)" : ""}\n\n--- stdout ---\n${result.stdout}\n\n--- stderr ---\n${result.stderr}${agentsMdBlock}`
 	return { content: [{ type: "text", text }] }
 }
