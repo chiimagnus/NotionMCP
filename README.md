@@ -7,4 +7,3 @@
 ## 选平台
 
 - [macOS：当前完整可运行入口](./docs/mac.md)
-- [Windows：PowerShell 入口与已知限制](./docs/windows.md)
