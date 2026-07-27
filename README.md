@@ -2,7 +2,7 @@
 
 🎯 通过鉴权反向代理和 Tailscale Funnel，把本地目录接给 Notion AI。`MCP_SANDBOX_DIR` 只是默认工作目录，不是硬隔离；公网安全边界是 Bearer Token。
 
-🛡️ 启动链路内置子进程监督：supergateway / auth-proxy 意外退出后会自动重启；stdio 会话关闭时，其 exec-server 会随之退出，不靠定时重启整条服务清理孤儿进程。运行过程写入仓库根目录的 `up.log`。
+🛡️ 启动链路内置子进程监督：supergateway / auth-proxy 意外退出后会自动重启。MCP 使用无状态 HTTP 请求，不会因 Session 过期而离线。运行过程写入仓库根目录的 `up.log`。
 
 运行配置集中在根目录的 [`.env`](./.env)，只保留用户通常会修改的目录、技能目录和端口。Token 及平台内部细节由程序处理。
 

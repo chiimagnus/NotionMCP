@@ -92,6 +92,13 @@ test("Linux 和 Windows 直接从 .env 读取 Token，并拒绝示例占位符",
 	}
 })
 
+test("网关使用无状态 HTTP，不保留会过期的 Session", async () => {
+	const launcher = await readFile(join(ROOT, "lib", "up.mjs"), "utf8")
+	const config = await readFile(join(ROOT, "lib", "config.mjs"), "utf8")
+	assert.doesNotMatch(launcher, /--stateful|--sessionTimeout/)
+	assert.doesNotMatch(config, /MCP_SESSION_TIMEOUT_MS|sessionTimeoutMs/)
+})
+
 async function waitForPid(file) {
 	for (let i = 0; i < 40; i += 1) {
 		try {
