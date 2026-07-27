@@ -126,7 +126,7 @@ export async function call(args) {
 	try {
 		content = readFileSync(join(skill.dir, "SKILL.md"), "utf-8")
 	} catch (err) {
-		log(`load_skills ${JSON.stringify(key)} -> read failed`)
+		log(`load_skills ${JSON.stringify(key)} -> read failed: ${err && err.message ? err.message : err}`)
 		return { content: [{ type: "text", text: `\u8bfb\u53d6\u5931\u8d25\uff1a${err}` }], isError: true }
 	}
 	log(`load_skills ${JSON.stringify(key)} -> ok`)
