@@ -15,7 +15,7 @@ import {
 	RASTER_MIME_TYPES,
 } from "../lib/config.mjs"
 import { resolvePath } from "../lib/paths.mjs"
-import { auditLog } from "../lib/audit-log.mjs"
+import { log } from "../lib/log.mjs"
 import { registerChild, terminateProcessTree, unregisterChild } from "../lib/process-tree.mjs"
 
 export const name = "read_image"
@@ -223,7 +223,7 @@ async function rasterizeSvgToPng(svgBytes, maxSize, signal) {
 		throw new Error(`SVG 栅格化失败，请安装 ImageMagick 或 librsvg：${errors.join("；")}`)
 	} finally {
 		await rm(outDir, { recursive: true, force: true }).catch((err) => {
-			auditLog("read_image", "temp_cleanup_failed", { errorType: err?.name || "Error" })
+			log("error", "read_image", "temp_cleanup_failed", { error: err })
 		})
 	}
 }
@@ -251,6 +251,6 @@ async function readImage({ path, maxSize }, signal) {
 
 export async function call(args, context = {}) {
 	const { data, mimeType } = await readImage(args || {}, context.signal)
-	auditLog("read_image", "finished", { outcome: "ok", mimeType })
+	log("info", "read_image", "finished", { outcome: "ok", mimeType })
 	return { content: [{ type: "image", data, mimeType }] }
 }

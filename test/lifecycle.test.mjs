@@ -81,7 +81,7 @@ test("平台 Token 要求 64 位十六进制且拒绝重复字符弱值", async 
 	}
 })
 
-test("审计日志轮转有界、单行有效且忽略敏感字段", async (t) => {
+test("诊断日志记录错误详情、脱敏并保持有界", async (t) => {
 	const dir = await mkdtemp(join(tmpdir(), "notionmcp-log-"))
 	t.after(() => rm(dir, { recursive: true, force: true }))
 	const config = await configFile(dir)
@@ -93,18 +93,25 @@ test("审计日志轮转有界、单行有效且忽略敏感字段", async (t) =
 	await handle.close()
 	await writeFile(backupFile, "stale backup")
 
-	const auditModule = pathToFileURL(join(ROOT, "lib", "audit-log.mjs")).href
+	const logModule = pathToFileURL(join(ROOT, "lib", "log.mjs")).href
 	const secret = "SECRET_TOKEN_AUTH_COMMAND_ARGS"
 	const source = `
-		const { auditLog } = await import(${JSON.stringify(auditModule)})
-		auditLog("test", "rotate", {
+		const { log, registerLogSecret } = await import(${JSON.stringify(logModule)})
+		registerLogSecret(${JSON.stringify(secret)})
+		log("info", "test", "rotate", {
 			outcome: "ok",
 			token: ${JSON.stringify(secret)},
 			authorization: ${JSON.stringify(secret)},
 			command: ${JSON.stringify(secret)},
 			args: ${JSON.stringify(secret)}
 		})
-		auditLog("test", "truncate", { errorType: ${JSON.stringify("中文\n".repeat(5_000))} })
+		const error = new Error("诊断失败 " + ${JSON.stringify(secret)})
+		error.stack += ${JSON.stringify("\n中文".repeat(5_000))}
+		log("error", "test", "diagnostic", {
+			error,
+			status: 500,
+			stderr: ${JSON.stringify("old line\nlast line " + secret)}
+		})
 	`
 	const child = spawn(process.execPath, ["--input-type=module", "-e", source], {
 		stdio: ["ignore", "ignore", "pipe"],
@@ -121,7 +128,14 @@ test("审计日志轮转有界、单行有效且忽略敏感字段", async (t) =
 		assert.doesNotThrow(() => JSON.parse(line))
 		assert.ok(Buffer.byteLength(`${line}\n`) <= 8 * 1024)
 	}
-	assert.equal(JSON.parse(lines[1]).truncated, true)
+	const diagnostic = JSON.parse(lines[1])
+	assert.equal(diagnostic.level, "error")
+	assert.equal(diagnostic.status, 500)
+	assert.equal(diagnostic.errorType, "Error")
+	assert.match(diagnostic.message, /诊断失败/)
+	assert.match(diagnostic.stack, /Error: 诊断失败/)
+	assert.match(diagnostic.stderr, /last line/)
+	assert.doesNotMatch(JSON.stringify(diagnostic), new RegExp(secret))
 	assert.equal((await stat(backupFile)).size, 10 * 1024 * 1024)
 	assert.ok((await stat(logFile)).size <= 10 * 1024 * 1024)
 
@@ -130,7 +144,7 @@ test("审计日志轮转有界、单行有效且忽略敏感字段", async (t) =
 	await oversizedBackup.close()
 	const prune = spawn(
 		process.execPath,
-		["--input-type=module", "-e", `const{auditLog}=await import(${JSON.stringify(auditModule)});auditLog("test","prune")`],
+		["--input-type=module", "-e", `const{log}=await import(${JSON.stringify(logModule)});log("info","test","prune")`],
 		{
 			stdio: ["ignore", "ignore", "pipe"],
 			env: { ...process.env, MCP_CONFIG_FILE: config, MCP_LOG_FILE: logFile },
