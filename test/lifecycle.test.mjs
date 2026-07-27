@@ -741,6 +741,30 @@ test("HTTP 路由、媒体类型和 body 上限失败后 server 仍可复用", a
 	})
 	assert.equal(unacceptable.status, 406)
 	await assertHttpHealthy(lifecycle, port, token)
+	for (const contentType of ["application/json-evil", "text/plain; note=application/json"]) {
+		const response = await httpRequest(port, {
+			headers: {
+				...baseHeaders,
+				Accept: "application/json, text/event-stream",
+				"Content-Type": contentType,
+			},
+			body: "{}",
+		})
+		assert.equal(response.status, 415)
+		await assertHttpHealthy(lifecycle, port, token)
+	}
+	for (const accept of [
+		"application/json-evil, text/event-stream",
+		"text/plain; note=application/json, text/event-stream",
+		"application/json;q=0, text/event-stream",
+	]) {
+		const response = await httpRequest(port, {
+			headers: { ...baseHeaders, Accept: accept, "Content-Type": "application/json" },
+			body: "{}",
+		})
+		assert.equal(response.status, 406)
+		await assertHttpHealthy(lifecycle, port, token)
+	}
 
 	const tooLarge = await headersOnlyRequest(port, {
 		...baseHeaders,
@@ -905,7 +929,7 @@ test("四个工具均经真实 HTTP 到达，apply_patch 在取消边界停止�
 	const operations = Array.from({ length: 200 }, (_, index) => ({
 		type: "create_file",
 		path: join(operationDir, `${String(index).padStart(3, "0")}.txt`),
-		content: "x",
+		content: index === 0 ? "x".repeat(512 * 1024) : "x",
 		overwrite: true,
 	}))
 	let pending
@@ -924,7 +948,7 @@ test("四个工具均经真实 HTTP 到达，apply_patch 在取消边界停止�
 	await settled
 	await waitForCondition(() => lifecycle.activeRequestCount === 0, "apply_patch 取消后 slot 未释放")
 	await waitForCondition(
-		async () => (await readFile(join(operationDir, "000.txt"), "utf8").catch(() => "")) === "x",
+		async () => (await stat(join(operationDir, "000.txt")).catch(() => null))?.size === 512 * 1024,
 		"已开始的 operation 未完成",
 	)
 	assert.equal(await readFile(join(operationDir, "199.txt"), "utf8").catch(() => null), null)
@@ -1016,7 +1040,12 @@ test("shutdown 取消活跃工具，并等待已 accept 的请求返回 503", as
 		socket.on("data", (chunk) => (text += chunk))
 		socket.on("close", () => resolve(text))
 	})
-	const shutdown = acceptedServer.lifecycle.shutdown()
+	let shutdownFinished = false
+	const shutdown = acceptedServer.lifecycle.shutdown().then(() => {
+		shutdownFinished = true
+	})
+	await new Promise((resolve) => setImmediate(resolve))
+	assert.equal(shutdownFinished, false)
 	socket.end(
 		`Authorization: Bearer ${acceptedServer.token}\r\nAccept: application/json, text/event-stream\r\nContent-Type: application/json\r\nContent-Length: ${Buffer.byteLength(markerBody)}\r\n\r\n${markerBody}`,
 	)
