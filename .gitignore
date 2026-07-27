@@ -1,5 +1,5 @@
-exec.log
-up.log
+*.log
+*.log
 node_modules/
 *.bak.*
 .codegraph
