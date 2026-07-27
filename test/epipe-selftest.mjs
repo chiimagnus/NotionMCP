@@ -71,10 +71,9 @@ if (/FATAL uncaughtException/.test(newLog)) {
 	fail("日志里出现了 FATAL uncaughtException —— 兜底没生效", newLog.slice(-800))
 }
 
-child.kill()
-
 // 进程活着还不够 —— 得确认真的触发过写入失败，否则这一跑什么也没验证到。
 if (evidence.length === 0) {
+	child.kill()
 	console.error("\u26a0\ufe0f 进程确实活着，但日志里没看到 EPIPE 降级记录。")
 	console.error("   本次没能真正触发写入失败（可能是平台管道语义差异），不能算通过。")
 	console.error(`   本次新增日志：\n${newLog.slice(-800)}`)
@@ -83,4 +82,28 @@ if (evidence.length === 0) {
 
 console.log("\u2705 自检通过：stdout 被关闭后 exec-server 仍存活，EPIPE 已降级为日志，未升级为致命错误")
 for (const line of evidence.slice(0, 3)) console.log(`   证据：${line.trim()}`)
+
+// ---- 第二半：该死的时候必须死 ----
+// stdio 约定：客户端关掉 stdin 就等于「不再需要你了」。以前没处理这个事件，每个结束的
+// 会话都会留下一个约 50MB 的进程永久挂着。这一半和上一半是配套的：把「不该死时
+// 自杀」堆掉之后，如果不同时保证「该死时会死」，孤儿进程只会活得更久。
+child.stdin.end()
+const exitCode = await Promise.race([
+	new Promise((r) => child.once("exit", (code) => r(code))),
+	sleep(5000).then(() => "timeout"),
+])
+
+if (exitCode === "timeout") {
+	child.kill()
+	fail("stdin 关闭后进程没有退出 —— 孤儿进程泄漏（每个约 50MB，每个会话一个）", stderrText)
+}
+
+const stdinLog = existsSync(LOG_FILE) ? readFileSync(LOG_FILE).subarray(logBytesBefore).toString("utf8") : ""
+const stdinEvidence = stdinLog.split("\n").filter((l) => /stdin 已关闭/.test(l))
+if (stdinEvidence.length === 0) {
+	fail("进程是退出了，但日志里没有 stdin EOF 的退出记录，不能确认它走的是正常退出路径", stdinLog.slice(-500))
+}
+
+console.log(`\u2705 第二半通过：stdin 关闭后进程自行退出（code=${exitCode}），不再残留孤儿进程`)
+console.log(`   证据：${stdinEvidence[0].trim()}`)
 process.exit(0)
