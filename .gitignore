@@ -1,8 +1,8 @@
-exec.log
-up.log
+*.log
 node_modules/
 *.bak.*
 .codegraph
 .env
 
 .agents-md-state.json
+.github/features
