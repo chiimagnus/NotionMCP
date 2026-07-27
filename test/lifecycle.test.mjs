@@ -114,7 +114,11 @@ test("审计日志轮转有界、单行有效且忽略敏感字段", async (t) =
 	assert.equal(lines.length, 2)
 	assert.doesNotMatch(text, /\uFFFD/)
 	assert.doesNotMatch(text, new RegExp(secret))
-	for (const line of lines) assert.ok(Buffer.byteLength(`${line}\n`) <= 8 * 1024)
+	for (const line of lines) {
+		assert.doesNotThrow(() => JSON.parse(line))
+		assert.ok(Buffer.byteLength(`${line}\n`) <= 8 * 1024)
+	}
+	assert.equal(JSON.parse(lines[1]).truncated, true)
 	assert.equal((await stat(backupFile)).size, 10 * 1024 * 1024)
 	assert.ok((await stat(logFile)).size <= 10 * 1024 * 1024)
 
