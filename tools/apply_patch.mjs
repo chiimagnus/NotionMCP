@@ -7,6 +7,7 @@
 
 import { readFile, writeFile, mkdir, unlink, stat } from "node:fs/promises"
 import { dirname } from "node:path"
+import { setImmediate as yieldToEventLoop } from "node:timers/promises"
 import { resolvePath } from "../lib/paths.mjs"
 import { auditLog } from "../lib/audit-log.mjs"
 import { getAgentsMdBlock } from "../lib/agentsMd.mjs"
@@ -136,6 +137,8 @@ export async function call(args, context = {}) {
 		const result = await applyOperation(op)
 		results.push(result)
 		auditLog("apply_patch", "operation", { operation: result.type || "unknown", outcome: result.status })
+		// ponytail: operation 是取消边界；让 HTTP close 事件有机会在下一次写入前到达。
+		await yieldToEventLoop()
 	}
 	const text = results
 		.map((r) => `[${r.status}] ${r.type} ${r.path}${r.output ? ` \u2014 ${r.output}` : ""}`)
