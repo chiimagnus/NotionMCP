@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import { spawn } from "node:child_process"
-import { mkdtemp, open, readFile, rm, stat, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, open, readFile, readdir, rm, stat, writeFile } from "node:fs/promises"
 import http from "node:http"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -213,6 +213,163 @@ async function assertDead(...pids) {
 	}
 	for (const pid of pids) assert.equal(isAlive(pid), false, `进程 ${pid} 不应残留`)
 }
+
+function captureChild(child, timeoutMs = 10_000) {
+	return new Promise((resolve, reject) => {
+		let stdout = ""
+		let stderr = ""
+		child.stdout?.on("data", (chunk) => (stdout += chunk))
+		child.stderr?.on("data", (chunk) => (stderr += chunk))
+		const timer = setTimeout(() => {
+			child.kill()
+			reject(new Error("等待测试子进程超时"))
+		}, timeoutMs)
+		child.once("error", reject)
+		child.once("close", (code) => {
+			clearTimeout(timer)
+			if (code === 0) resolve(stdout)
+			else reject(new Error(stderr || `测试子进程退出：${code}`))
+		})
+	})
+}
+
+async function runImageTool(config, args, abortAfterMs) {
+	const moduleUrl = pathToFileURL(join(ROOT, "tools", "read_image.mjs")).href
+	const source = `
+		const { call } = await import(${JSON.stringify(moduleUrl)})
+		const controller = new AbortController()
+		const abortAfter = ${JSON.stringify(abortAfterMs)}
+		if (abortAfter === 0) controller.abort()
+		else if (abortAfter) setTimeout(() => controller.abort(), abortAfter)
+		try {
+			const result = await call(${JSON.stringify(args)}, { signal: controller.signal })
+			process.stdout.write(JSON.stringify({ result }))
+		} catch (error) {
+			process.stdout.write(JSON.stringify({ error: error.message, name: error.name }))
+		}
+	`
+	const child = spawn(process.execPath, ["--input-type=module", "-e", source], {
+		stdio: ["ignore", "pipe", "pipe"],
+		env: {
+			...process.env,
+			MCP_CONFIG_FILE: config,
+			MCP_LOG_FILE: join(config, "..", "image.log"),
+		},
+	})
+	return JSON.parse(await captureChild(child, 40_000))
+}
+
+async function runRasterizerTool(config, command, args, { abortAfterMs, timeoutMs } = {}) {
+	const moduleUrl = pathToFileURL(join(ROOT, "tools", "read_image.mjs")).href
+	const source = `
+		const { runRasterizer } = await import(${JSON.stringify(moduleUrl)})
+		const controller = new AbortController()
+		const abortAfter = ${JSON.stringify(abortAfterMs)}
+		if (abortAfter === 0) controller.abort()
+		else if (abortAfter) setTimeout(() => controller.abort(), abortAfter)
+		const result = await runRasterizer(
+			${JSON.stringify(command)},
+			${JSON.stringify(args)},
+			{ signal: controller.signal, timeoutMs: ${JSON.stringify(timeoutMs)} }
+		)
+		process.stdout.write(JSON.stringify(result))
+	`
+	const child = spawn(process.execPath, ["--input-type=module", "-e", source], {
+		stdio: ["ignore", "pipe", "pipe"],
+		env: {
+			...process.env,
+			MCP_CONFIG_FILE: config,
+			MCP_LOG_FILE: join(config, "..", "rasterizer.log"),
+		},
+	})
+	return JSON.parse(await captureChild(child))
+}
+
+test("read_image 只读取普通文件并对输入输出施加 10 MiB 上限", async (t) => {
+	const dir = await mkdtemp(join(tmpdir(), "notionmcp-image-"))
+	t.after(() => rm(dir, { recursive: true, force: true }))
+	const config = await configFile(dir, await freePort(), await freePort())
+	const small = join(dir, "small.png")
+	await writeFile(small, Buffer.from([0x89, 0x50, 0x4e, 0x47]))
+	const ok = await runImageTool(config, { path: small })
+	assert.equal(ok.result.content[0].mimeType, "image/png")
+	assert.equal(ok.result.content[0].data, Buffer.from([0x89, 0x50, 0x4e, 0x47]).toString("base64"))
+
+	for (const extension of ["png", "svg"]) {
+		const large = join(dir, `large.${extension}`)
+		const handle = await open(large, "w")
+		await handle.truncate(10 * 1024 * 1024 + 1)
+		await handle.close()
+		const result = await runImageTool(config, { path: large })
+		assert.match(result.error, /observed \d+ bytes, limit 10485760/)
+	}
+
+	const directoryImage = join(dir, "directory.png")
+	await mkdir(directoryImage)
+	const special = await runImageTool(config, { path: directoryImage })
+	assert.match(special.error, /regular file/)
+})
+
+test("read_image 严格校验 maxSize，预取消不读取文件", async (t) => {
+	const dir = await mkdtemp(join(tmpdir(), "notionmcp-image-input-"))
+	t.after(() => rm(dir, { recursive: true, force: true }))
+	const config = await configFile(dir, await freePort(), await freePort())
+	const image = join(dir, "small.png")
+	await writeFile(image, "image")
+	for (const maxSize of [0, -1, 1.5, "1", 2_001]) {
+		const result = await runImageTool(config, { path: image, maxSize })
+		assert.match(result.error, /maxSize must be an integer/)
+	}
+	const cancelled = await runImageTool(config, { path: join(dir, "missing.png") }, 0)
+	assert.equal(cancelled.name, "AbortError")
+})
+
+test("rasterizer 的 stderr、timeout 与 Abort 均有界且清理进程树", async (t) => {
+	const dir = await mkdtemp(join(tmpdir(), "notionmcp-rasterizer-"))
+	t.after(() => rm(dir, { recursive: true, force: true }))
+	const config = await configFile(dir, await freePort(), await freePort())
+	const helper = join(dir, "rasterizer.cjs")
+	await writeFile(
+		helper,
+		`const{spawn}=require("node:child_process");const{writeFileSync}=require("node:fs");const mode=process.argv[2];if(mode==="stderr"){process.stderr.write("中".repeat(5000));process.exit(1)}else if(mode==="grand"){writeFileSync(process.argv[3],String(process.pid));setInterval(()=>{},1000)}else{writeFileSync(process.argv[3],String(process.pid));spawn(process.execPath,[__filename,"grand",process.argv[4]],{stdio:"ignore"});setInterval(()=>{},1000)}\n`,
+	)
+
+	const bounded = await runRasterizerTool(config, process.execPath, [helper, "stderr"], { timeoutMs: 5_000 })
+	assert.equal(bounded.code, 1)
+	assert.ok(Buffer.byteLength(bounded.stderr) <= 8 * 1024)
+	assert.match(bounded.stderr, /truncated/)
+
+	for (const [kind, options] of [
+		["abort", { abortAfterMs: 200, timeoutMs: 5_000 }],
+		["timeout", { timeoutMs: 200 }],
+	]) {
+		const parentFile = join(dir, `${kind}-parent.pid`)
+		const grandFile = join(dir, `${kind}-grand.pid`)
+		const pending = runRasterizerTool(
+			config,
+			process.execPath,
+			[helper, "tree", parentFile, grandFile],
+			options,
+		)
+		const parentPid = await waitForPid(parentFile)
+		const grandPid = await waitForPid(grandFile)
+		const result = await pending
+		assert.equal(result[kind === "abort" ? "cancelled" : "timedOut"], true)
+		await assertDead(parentPid, grandPid)
+	}
+})
+
+test("SVG 栅格化无论成功失败都删除临时目录", async (t) => {
+	const dir = await mkdtemp(join(tmpdir(), "notionmcp-svg-"))
+	t.after(() => rm(dir, { recursive: true, force: true }))
+	const config = await configFile(dir, await freePort(), await freePort())
+	const svg = join(dir, "small.svg")
+	await writeFile(svg, `<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"/>`)
+	const before = new Set((await readdir(tmpdir())).filter((name) => name.startsWith("svg-thumb-")))
+	await runImageTool(config, { path: svg })
+	const leaked = (await readdir(tmpdir())).filter((name) => name.startsWith("svg-thumb-") && !before.has(name))
+	assert.deepEqual(leaked, [])
+})
 
 test("run_command 在 data 阶段限制输出并保留拆分的 UTF-8", async (t) => {
 	const dir = await mkdtemp(join(tmpdir(), "notionmcp-output-"))
