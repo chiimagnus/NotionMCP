@@ -7,7 +7,7 @@ import { join } from "node:path"
 import test from "node:test"
 
 const ROOT = join(import.meta.dirname, "..")
-const WINDOWS_TOKEN = "a".repeat(64)
+const PLATFORM_TOKEN = "a".repeat(64)
 
 function waitForExit(child, timeoutMs = 5_000) {
 	return new Promise((resolve, reject) => {
@@ -52,34 +52,44 @@ async function configFile(dir, proxyPort, upstreamPort) {
 			`MCP_SKILLS_DIR_MACOS=${dir}`,
 			`MCP_SANDBOX_DIR_LINUX=${dir}`,
 			`MCP_SKILLS_DIR_LINUX=${dir}`,
+			`MCP_TOKEN_LINUX=${PLATFORM_TOKEN}`,
 			`MCP_SANDBOX_DIR_WINDOWS=${dir}`,
 			`MCP_SKILLS_DIR_WINDOWS=${dir}`,
-			`MCP_TOKEN_WINDOWS=${WINDOWS_TOKEN}`,
+			`MCP_TOKEN_WINDOWS=${PLATFORM_TOKEN}`,
 		].join("\n"),
 	)
 	return file
 }
 
-test("Windows 直接从 .env 读取 Token，并拒绝示例占位符", async (t) => {
+test("Linux 和 Windows 直接从 .env 读取 Token，并拒绝示例占位符", async (t) => {
 	const dir = await mkdtemp(join(tmpdir(), "notionmcp-config-"))
 	t.after(() => rm(dir, { recursive: true, force: true }))
 	const config = await configFile(dir, await freePort(), await freePort())
 	const previousConfig = process.env.MCP_CONFIG_FILE
-	const previousToken = process.env.MCP_TOKEN_WINDOWS
+	const previousTokens = {
+		MCP_TOKEN_LINUX: process.env.MCP_TOKEN_LINUX,
+		MCP_TOKEN_WINDOWS: process.env.MCP_TOKEN_WINDOWS,
+	}
 	t.after(() => {
 		if (previousConfig === undefined) delete process.env.MCP_CONFIG_FILE
 		else process.env.MCP_CONFIG_FILE = previousConfig
-		if (previousToken === undefined) delete process.env.MCP_TOKEN_WINDOWS
-		else process.env.MCP_TOKEN_WINDOWS = previousToken
+		for (const [key, value] of Object.entries(previousTokens)) {
+			if (value === undefined) delete process.env[key]
+			else process.env[key] = value
+		}
 	})
 
 	process.env.MCP_CONFIG_FILE = config
+	delete process.env.MCP_TOKEN_LINUX
 	delete process.env.MCP_TOKEN_WINDOWS
-	const { getLauncherConfig } = await import(`../lib/config.mjs?windows-token=${Date.now()}`)
-	assert.equal(getLauncherConfig("windows").token, WINDOWS_TOKEN)
-
-	process.env.MCP_TOKEN_WINDOWS = "请替换为随机生成的64位十六进制字符串"
-	assert.throws(() => getLauncherConfig("windows"), /请先替换 MCP_TOKEN_WINDOWS/)
+	const { getLauncherConfig } = await import(`../lib/config.mjs?platform-token=${Date.now()}`)
+	for (const platform of ["linux", "windows"]) {
+		const key = `MCP_TOKEN_${platform.toUpperCase()}`
+		assert.equal(getLauncherConfig(platform).token, PLATFORM_TOKEN)
+		process.env[key] = "请替换为随机生成的64位十六进制字符串"
+		assert.throws(() => getLauncherConfig(platform), new RegExp(`请先替换 ${key}`))
+		delete process.env[key]
+	}
 })
 
 async function waitForPid(file) {

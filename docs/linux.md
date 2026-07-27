@@ -2,7 +2,7 @@
 
 ## 前置条件
 
-安装 Node.js、Tailscale CLI 和 OpenSSL。SVG 图片需要额外安装 ImageMagick（`magick`/`convert`）或 librsvg（`rsvg-convert`），位图图片不需要额外依赖。
+安装 Node.js 和 Tailscale CLI。SVG 图片需要额外安装 ImageMagick（`magick`/`convert`）或 librsvg（`rsvg-convert`），位图图片不需要额外依赖。
 
 ## 配置
 
@@ -17,7 +17,10 @@ cp .env.example .env
 ```dotenv
 MCP_SANDBOX_DIR_LINUX=~/AI-Share
 MCP_SKILLS_DIR_LINUX=~/.codex/skills
+MCP_TOKEN_LINUX=请替换为随机生成的64位十六进制字符串
 ```
+
+`.env` 已被 Git 忽略，但其中的 Token 是明文；不要提交、分享或复制到其他文件。
 
 ## 一次性准备
 
@@ -29,16 +32,13 @@ npm install
 
 启动器只使用本地安装并由 `package-lock.json` 锁定的 supergateway；缺少依赖时会直接报错，不再临时联网下载另一份。
 
-### 1. 保存 Token
+### 1. 生成 Token
 
 ```bash
-mkdir -p "$HOME/.mcp"
-umask 077
-openssl rand -hex 32 > "$HOME/.mcp/token"
-chmod 600 "$HOME/.mcp/token"
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 ```
 
-Token 不要写进仓库、Notion 页面或聊天记录。
+把输出同时填入 `.env` 的 `MCP_TOKEN_LINUX` 和 Notion 的 Token 字段。
 
 ### 2. 首次开通 Tailscale Funnel
 
@@ -57,7 +57,7 @@ chmod +x ./up.sh
 | --- | --- |
 | Server URL | `https://<你的设备名>.<你的tailnet名>.ts.net/mcp` |
 | 鉴权方式 | **Bearer Token**，前缀选 `Bearer` |
-| Token | `~/.mcp/token` 里的裸 token，不要再手动加 `Bearer` |
+| Token | `.env` 中 `MCP_TOKEN_LINUX` 的值，不要再手动加 `Bearer` |
 | 权限 | 按需选择 |
 
 Token 泄露等价于允许公网调用当前用户可执行的命令；重要数据应另行备份。
