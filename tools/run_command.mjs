@@ -113,22 +113,46 @@ function timeoutValue(timeoutMs) {
 	return timeoutMs
 }
 
+function logResult(result, startedAt, error) {
+	const level = result.cancelled ? "warning" : result.code === 0 ? "info" : "error"
+	const message = result.cancelled
+		? "Command cancelled"
+		: result.timedOut
+			? "Command timed out"
+			: result.code === 0
+				? undefined
+				: `Command exited with code ${result.code}`
+	log(level, "run_command", "finished", {
+		code: result.code,
+		elapsedMs: Date.now() - startedAt,
+		timedOut: result.timedOut,
+		cancelled: result.cancelled,
+		...(message ? { message } : {}),
+		...(result.code !== 0 && result.stderr ? { stderr: result.stderr } : {}),
+		...(error ? { error } : {}),
+	})
+}
+
 function runCommand({ command, cwd, timeoutMs }, { signal } = {}) {
 	return new Promise((resolve) => {
+		const startedAt = Date.now()
+		const finishEarly = (result, error) => {
+			logResult(result, startedAt, error)
+			resolve(result)
+		}
 		if (!command || typeof command !== "string") {
-			resolve({ code: -1, stdout: "", stderr: "Missing required 'command' string", timedOut: false, cancelled: false })
+			finishEarly({ code: -1, stdout: "", stderr: "Missing required 'command' string", timedOut: false, cancelled: false })
 			return
 		}
 		if (signal?.aborted) {
-			log("warning", "run_command", "finished", { code: -1, timedOut: false, cancelled: true })
-			resolve({ code: -1, stdout: "", stderr: "Command cancelled", timedOut: false, cancelled: true })
+			finishEarly({ code: -1, stdout: "", stderr: "Command cancelled", timedOut: false, cancelled: true })
 			return
 		}
 		let shell
 		try {
 			shell = getShell()
 		} catch (err) {
-			resolve({ code: -1, stdout: "", stderr: String(err.message || err), timedOut: false, cancelled: false })
+			finishEarly({ code: -1, stdout: "", stderr: String(err.message || err), timedOut: false, cancelled: false }, err)
 			return
 		}
 		const workDir = cwd ? resolvePath(cwd) : SANDBOX_DIR
@@ -136,11 +160,10 @@ function runCommand({ command, cwd, timeoutMs }, { signal } = {}) {
 		try {
 			timeout = timeoutValue(timeoutMs)
 		} catch (err) {
-			resolve({ code: -1, stdout: "", stderr: err.message, timedOut: false, cancelled: false })
+			finishEarly({ code: -1, stdout: "", stderr: err.message, timedOut: false, cancelled: false }, err)
 			return
 		}
 		let child
-		const startedAt = Date.now()
 		try {
 			const winCommand =
 				process.platform === "win32"
@@ -156,7 +179,7 @@ function runCommand({ command, cwd, timeoutMs }, { signal } = {}) {
 			})
 			registerChild(child)
 		} catch (err) {
-			resolve({ code: -1, stdout: "", stderr: String(err), timedOut: false, cancelled: false })
+			finishEarly({ code: -1, stdout: "", stderr: String(err), timedOut: false, cancelled: false }, err)
 			return
 		}
 		const stdout = outputCollector()
@@ -191,19 +214,15 @@ function runCommand({ command, cwd, timeoutMs }, { signal } = {}) {
 			stderr.append(stderrDecoder.end())
 			if (error) stderr.append(String(error.message || error))
 			const exitCode = code ?? -1
-				log(exitCode === 0 ? "info" : "error", "run_command", "finished", {
-				code: exitCode,
-				elapsedMs: Date.now() - startedAt,
-				timedOut,
-				cancelled,
-			})
-			resolve({
+			const result = {
 				code: exitCode,
 				stdout: stdout.value(),
 				stderr: stderr.value(),
 				timedOut,
 				cancelled,
-			})
+			}
+			logResult(result, startedAt, error)
+			resolve(result)
 		}
 		const stop = (reason) => {
 			if (settled || stopPromise) return stopPromise

@@ -220,7 +220,9 @@ async function rasterizeSvgToPng(svgBytes, maxSize, signal) {
 				errors.push(`${command}: ${err.message}`)
 			}
 		}
-		throw new Error(`SVG 栅格化失败，请安装 ImageMagick 或 librsvg：${errors.join("；")}`)
+		const error = new Error(`SVG 栅格化失败，请安装 ImageMagick 或 librsvg：${errors.join("；")}`)
+		error.stderr = errors.join("\n")
+		throw error
 	} finally {
 		await rm(outDir, { recursive: true, force: true }).catch((err) => {
 			log("error", "read_image", "temp_cleanup_failed", { error: err })

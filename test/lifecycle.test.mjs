@@ -154,6 +154,28 @@ test("诊断日志记录错误详情、脱敏并保持有界", async (t) => {
 	await assert.rejects(stat(backupFile), { code: "ENOENT" })
 })
 
+test("启动配置失败也写入可诊断日志", async (t) => {
+	const dir = await mkdtemp(join(tmpdir(), "notionmcp-startup-log-"))
+	t.after(() => rm(dir, { recursive: true, force: true }))
+	const logFile = join(dir, "mcp.log")
+	const child = spawn(process.execPath, [join(ROOT, "lib", "up.mjs")], {
+		stdio: ["ignore", "ignore", "ignore"],
+		env: {
+			...process.env,
+			MCP_CONFIG_FILE: join(dir, "missing.env"),
+			MCP_LOG_FILE: logFile,
+		},
+	})
+	assert.equal(await waitForExit(child), 1)
+	const records = (await readFile(logFile, "utf8")).trimEnd().split("\n").map(JSON.parse)
+	const failure = records.find((record) => record.scope === "launcher" && record.event === "failed")
+	assert.equal(failure.level, "error")
+	assert.equal(failure.reason, "startup_failed")
+	assert.match(failure.message, /无法读取配置文件/)
+	assert.match(failure.stack, /config\.mjs/)
+	assert.equal(records.at(-1).event, "stopped")
+})
+
 test("旧日志 writer 已从运行路径删除", async () => {
 	const launcher = await readFile(join(ROOT, "lib", "up.mjs"), "utf8")
 	assert.doesNotMatch(launcher, /UP_LOG_FILE|appendFile\(/)
@@ -731,6 +753,10 @@ test("鉴权早于 body、slot 和 SDK 创建", async (t) => {
 	const log = await readFile(join(httpFixture.dir, "http.log"), "utf8").catch(() => "")
 	assert.doesNotMatch(log, /Bearer wrong/)
 	assert.doesNotMatch(log, new RegExp("c".repeat(64)))
+	const records = log.trimEnd().split("\n").filter(Boolean).map(JSON.parse)
+	const rejection = records.findLast((record) => record.scope === "http" && record.status === 401)
+	assert.equal(rejection.level, "warning")
+	assert.equal(rejection.reason, "unauthorized")
 })
 
 test("HTTP 路由、媒体类型和 body 上限失败后 server 仍可复用", async (t) => {
@@ -973,6 +999,33 @@ test("四个工具均经真实 HTTP 到达，apply_patch 在取消边界停止�
 		"已开始的 operation 未完成",
 	)
 	assert.equal(await readFile(join(operationDir, "199.txt"), "utf8").catch(() => null), null)
+})
+
+test("命令失败日志保留 stderr 尾部但不记录命令、stdout 或 Token", async (t) => {
+	const { lifecycle, port, token } = await startMcpServer(t)
+	const helper = join(httpFixture.dir, "http-failure.cjs")
+	const stdoutMarker = "STDOUT_MUST_NOT_BE_LOGGED"
+	const stderrMarker = "FINAL_STDERR_DIAGNOSTIC"
+	await writeFile(
+		helper,
+		`process.stdout.write(${JSON.stringify(stdoutMarker)});process.stderr.write("old\\n"+process.argv[2]+"\\n"+${JSON.stringify(stderrMarker)});process.exit(7)\n`,
+	)
+	const response = await mcpRequest(port, token, toolCall("run_command", {
+		command: nodeCommand(helper, token),
+	}))
+	assert.equal(response.status, 200)
+	assert.match(JSON.parse(response.body).result.content[0].text, /exit code: 7/)
+	await waitForCondition(() => lifecycle.activeRequestCount === 0, "失败命令未释放请求")
+
+	const text = await readFile(join(httpFixture.dir, "http.log"), "utf8")
+	const records = text.trimEnd().split("\n").map(JSON.parse)
+	const failure = records.findLast((record) => record.scope === "run_command" && record.code === 7)
+	assert.equal(failure.level, "error")
+	assert.match(failure.message, /exited with code 7/)
+	assert.match(failure.stderr, new RegExp(stderrMarker))
+	assert.doesNotMatch(JSON.stringify(failure), new RegExp(token))
+	assert.doesNotMatch(JSON.stringify(failure), new RegExp(stdoutMarker))
+	assert.equal("command" in failure, false)
 })
 
 test("HTTP socket 断开会取消 rasterizer 并删除临时目录", async (t) => {
