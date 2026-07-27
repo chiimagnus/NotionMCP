@@ -562,7 +562,7 @@ function headersOnlyRequest(port, headers, timeoutMs = 500) {
 
 async function startMcpServer(t) {
 	const { module } = await getHttpFixture()
-	const token = "b".repeat(64)
+	const token = PLATFORM_TOKEN
 	const lifecycle = module.createMcpHttpServer({ port: 0, token })
 	t.after(() => lifecycle.shutdown())
 	const { port } = await lifecycle.listen()
