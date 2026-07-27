@@ -17,7 +17,10 @@ Copy-Item .env.example .env
 ```dotenv
 MCP_SANDBOX_DIR_WINDOWS=~/AI-Share
 MCP_SKILLS_DIR_WINDOWS=~/.codex/skills
+MCP_TOKEN_WINDOWS=请替换为随机生成的64位十六进制字符串
 ```
+
+`.env` 已被 Git 忽略，但其中的 Token 是明文；不要提交、分享或复制到其他文件。
 
 ## 一次性准备
 
@@ -29,28 +32,13 @@ npm install
 
 启动器只使用本地安装并由 `package-lock.json` 锁定的 supergateway；缺少依赖时会直接报错，不再临时联网下载另一份。
 
-### 1. 保存或更新 Token
+### 1. 生成 Token
 
 ```pwsh
-$TokenDir=Join-Path $env:USERPROFILE ".mcp"; New-Item -ItemType Directory -Force -Path $TokenDir | Out-Null; $Token=node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"; $Token | ConvertTo-SecureString -AsPlainText -Force | ConvertFrom-SecureString | Set-Content (Join-Path $TokenDir "token.enc")
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 ```
 
-`token.enc` 使用 Windows DPAPI，只能由当前 Windows 用户在当前机器上读取。Token 不要写进仓库、Notion 页面或聊天记录。
-可用下面命令检查 token 文件权限：
-
-```pwsh
-icacls.exe (Join-Path $TokenDir "token.enc")
-```
-
-不要用 Administrator 运行服务，并建议开启 BitLocker。
-
-需要填入 Notion 时可临时读取裸 token（不要把输出保存进文件）：
-
-```pwsh
-$secure=Get-Content (Join-Path $env:USERPROFILE ".mcp\token.enc") | ConvertTo-SecureString; $ptr=[Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure); try { [Runtime.InteropServices.Marshal]::PtrToStringBSTR($ptr) } finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($ptr) }
-```
-
-这里只为填入 Notion 临时输出 token；不要把输出保存到文件或提交到仓库。
+把输出同时填入 `.env` 的 `MCP_TOKEN_WINDOWS` 和 Notion 的 Token 字段。
 
 如果 PowerShell 7 禁止执行脚本，先执行：
 
@@ -89,7 +77,7 @@ Agent → **Add connection → Custom MCP server**
 | --- | --- |
 | Server URL | `https://<你的设备名>.<你的tailnet名>.ts.net/mcp` |
 | 鉴权方式 | **Bearer Token**，前缀选 `Bearer` |
-| Token | 上一步解出的裸 token，不要再手动加 `Bearer` |
+| Token | `.env` 中 `MCP_TOKEN_WINDOWS` 的值，不要再手动加 `Bearer` |
 | 权限 | 按需选择 |
 
 Token 泄露等价于允许公网调用当前用户可执行的命令；重要数据应另行备份。
