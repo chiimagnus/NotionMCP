@@ -6,7 +6,7 @@
 // can still reach outside SANDBOX_DIR. The only real gate is the bearer
 // token checked by auth-proxy.mjs in front of this server.
 
-import { spawn } from "node:child_process"
+import { spawn, spawnSync } from "node:child_process"
 import { existsSync } from "node:fs"
 import { delimiter, join } from "node:path"
 import { StringDecoder } from "node:string_decoder"
@@ -77,6 +77,25 @@ export const definition = {
 	},
 }
 
+// 进程退出后给 stdio 排空剩余数据的宽限。
+const STDIO_FLUSH_GRACE_MS = 2_000
+
+// ponytail: Windows 上 child.kill() 只能杀掉 pwsh 本身，命令里用 Start-Process
+// 拉起的后台进程会活下来，并继续持有继承来的 stdout 写端。taskkill /T 连子
+// 孙一起杀 —— 跟 lib/up.mjs 里 killChild() 已经在用的做法保持一致。
+function killTree(child) {
+	if (!child || !child.pid) return
+	if (process.platform === "win32") {
+		try {
+			spawnSync("taskkill.exe", ["/PID", String(child.pid), "/T", "/F"], { stdio: "ignore", timeout: 10_000 })
+			return
+		} catch {}
+	}
+	try {
+		child.kill("SIGKILL")
+	} catch {}
+}
+
 function runCommand({ command, cwd, timeoutMs }) {
 	return new Promise((resolve) => {
 		if (!command || typeof command !== "string") {
@@ -109,25 +128,48 @@ function runCommand({ command, cwd, timeoutMs }) {
 		let stdout = ""
 		let stderr = ""
 		let timedOut = false
+		let settled = false
+		let flushTimer = null
 		// 用 StringDecoder 做增量解码，避免多字节 UTF-8 字符（比如中文）
 		// 刚好被拆分在两个 data 分片之间时产生乱码。
 		const stdoutDecoder = new StringDecoder("utf8")
 		const stderrDecoder = new StringDecoder("utf8")
-		const timer = setTimeout(() => {
-			timedOut = true
-			child.kill("SIGKILL")
-		}, timeout)
-		child.stdout.on("data", (d) => (stdout += stdoutDecoder.write(d)))
-		child.stderr.on("data", (d) => (stderr += stderrDecoder.write(d)))
-		child.on("close", (code) => {
+		const finish = (code) => {
+			if (settled) return
+			settled = true
 			clearTimeout(timer)
+			clearTimeout(flushTimer)
 			stdout += stdoutDecoder.end()
 			stderr += stderrDecoder.end()
 			log(`cmd=${JSON.stringify(command)} cwd=${JSON.stringify(workDir)} exit=${code} timedOut=${timedOut}`)
 			resolve({ code, stdout: truncate(stdout), stderr: truncate(stderr), timedOut })
+		}
+		const timer = setTimeout(() => {
+			timedOut = true
+			killTree(child)
+		}, timeout)
+		child.stdout.on("data", (d) => (stdout += stdoutDecoder.write(d)))
+		child.stderr.on("data", (d) => (stderr += stderrDecoder.write(d)))
+		// "close" 要等进程结束【且】所有 stdio 管道 EOF。命令里如果用 Start-Process /
+		// nohup 之类拉起了后台孙子进程，它会继承 stdout 写端句柄，管道永远不会 EOF，
+		// "close" 也就永远不会来 —— 这次调用会一直挂着，直到上游超时取消请求。
+		// 所以以 "exit"（进程确实结束了）为准，再给 stdio 一点时间排空剩余数据。
+		child.on("exit", (code) => {
+			if (settled) return
+			clearTimeout(flushTimer)
+			flushTimer = setTimeout(() => {
+				child.stdout?.destroy()
+				child.stderr?.destroy()
+				finish(code)
+			}, STDIO_FLUSH_GRACE_MS)
+			flushTimer.unref?.()
 		})
+		child.on("close", (code) => finish(code))
 		child.on("error", (err) => {
+			if (settled) return
+			settled = true
 			clearTimeout(timer)
+			clearTimeout(flushTimer)
 			resolve({ code: -1, stdout, stderr: String(err), timedOut: false })
 		})
 	})
