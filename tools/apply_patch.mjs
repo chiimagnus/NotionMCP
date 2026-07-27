@@ -7,8 +7,9 @@
 
 import { readFile, writeFile, mkdir, unlink, stat } from "node:fs/promises"
 import { dirname } from "node:path"
+import { setImmediate as yieldToEventLoop } from "node:timers/promises"
 import { resolvePath } from "../lib/paths.mjs"
-import { log } from "../lib/rpc.mjs"
+import { log } from "../lib/log.mjs"
 import { getAgentsMdBlock } from "../lib/agentsMd.mjs"
 
 export const name = "apply_patch"
@@ -79,7 +80,8 @@ async function fileExists(path) {
 async function applyOperation(op) {
 	const { type, path: rawPath } = op || {}
 	if (!rawPath || typeof rawPath !== "string") {
-		return { path: rawPath, type, status: "failed", output: "Missing required 'path' string" }
+		const error = new Error("Missing required 'path' string")
+		return { path: rawPath, type, status: "failed", output: error.message, error }
 	}
 	const resolved = resolvePath(rawPath)
 	try {
@@ -103,7 +105,7 @@ async function applyOperation(op) {
 					throw new Error("each edit requires 'oldStr' and 'newStr' strings")
 				}
 				const count = text.split(oldStr).length - 1
-				if (count === 0) throw new Error(`oldStr not found in ${rawPath}: ${JSON.stringify(oldStr.slice(0, 200))}`)
+				if (count === 0) throw new Error(`oldStr not found in ${rawPath}`)
 				if (count > 1 && !replaceAll) {
 					throw new Error(`oldStr matches ${count} times in ${rawPath}; set replaceAll: true or make oldStr more specific`)
 				}
@@ -118,26 +120,42 @@ async function applyOperation(op) {
 		}
 		throw new Error(`Unknown operation type '${type}'`)
 	} catch (err) {
-		return { path: rawPath, type, status: "failed", output: String((err && err.message) || err) }
+		return { path: rawPath, type, status: "failed", output: String((err && err.message) || err), error: err }
 	}
 }
 
-export async function call(args) {
+export async function call(args, context = {}) {
 	const operations = (args && args.operations) || []
 	if (!Array.isArray(operations) || operations.length === 0) {
+		log("error", "apply_patch", "finished", { message: "'operations' must be a non-empty array" })
 		return { content: [{ type: "text", text: "Error: 'operations' must be a non-empty array" }], isError: true }
 	}
 	const results = []
 	for (const op of operations) {
+		if (context.signal?.aborted) {
+			results.push({ type: op?.type, path: op?.path, status: "failed", output: "Cancelled before operation" })
+			log("warning", "apply_patch", "operation", {
+				operation: op?.type || "unknown",
+				outcome: "cancelled",
+				message: "Cancelled before operation",
+			})
+			break
+		}
 		const result = await applyOperation(op)
 		results.push(result)
-		log(`apply_patch ${result.type} ${JSON.stringify(result.path)} -> ${result.status}`)
+		log(result.status === "failed" ? "error" : "info", "apply_patch", "operation", {
+			operation: result.type || "unknown",
+			outcome: result.status,
+			...(result.error ? { error: result.error } : {}),
+		})
+		// ponytail: operation 是取消边界；让 HTTP close 事件有机会在下一次写入前到达。
+		await yieldToEventLoop()
 	}
 	const text = results
 		.map((r) => `[${r.status}] ${r.type} ${r.path}${r.output ? ` \u2014 ${r.output}` : ""}`)
 		.join("\n")
 	const hasFailure = results.some((r) => r.status === "failed")
 	const firstPath = operations[0] && operations[0].path
-	const agentsMdBlock = firstPath ? getAgentsMdBlock(dirname(resolvePath(firstPath))) : ""
+	const agentsMdBlock = firstPath && !context.signal?.aborted ? getAgentsMdBlock(dirname(resolvePath(firstPath))) : ""
 	return { content: [{ type: "text", text: text + agentsMdBlock }], isError: hasFailure }
 }
