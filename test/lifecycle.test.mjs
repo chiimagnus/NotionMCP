@@ -518,13 +518,57 @@ function mcpRequest(port, token, message, extraHeaders = {}) {
 	})
 }
 
-test("原生无状态 HTTP 完成基础 MCP 协议且可确定关闭", async (t) => {
+function headersOnlyRequest(port, headers, timeoutMs = 500) {
+	return new Promise((resolve, reject) => {
+		let settled = false
+		const finish = (error, response) => {
+			if (settled) return
+			settled = true
+			clearTimeout(timer)
+			req.destroy()
+			if (error) reject(error)
+			else resolve(response)
+		}
+		const req = http.request({ host: "127.0.0.1", port, path: "/mcp", method: "POST", headers }, (res) => {
+			const chunks = []
+			res.on("data", (chunk) => chunks.push(chunk))
+			res.once("end", () =>
+				finish(null, {
+					status: res.statusCode,
+					headers: res.headers,
+					body: Buffer.concat(chunks).toString("utf8"),
+				}),
+			)
+		})
+		const timer = setTimeout(() => finish(new Error("响应超时")), timeoutMs)
+		req.once("error", (error) => {
+			if (!settled) finish(error)
+		})
+		req.flushHeaders()
+	})
+}
+
+async function startMcpServer(t) {
 	const { module } = await getHttpFixture()
 	const token = "b".repeat(64)
 	const lifecycle = module.createMcpHttpServer({ port: 0, token })
 	t.after(() => lifecycle.shutdown())
-	const address = await lifecycle.listen()
-	const port = address.port
+	const { port } = await lifecycle.listen()
+	return { lifecycle, port, token }
+}
+
+const TOOLS_LIST = { jsonrpc: "2.0", id: 99, method: "tools/list", params: {} }
+
+async function assertHttpHealthy(lifecycle, port, token) {
+	const response = await mcpRequest(port, token, TOOLS_LIST)
+	assert.equal(response.status, 200)
+	assert.equal(JSON.parse(response.body).result.tools.length, 4)
+	assert.equal(response.headers["mcp-session-id"], undefined)
+	assert.equal(lifecycle.activeRequestCount, 0)
+}
+
+test("原生无状态 HTTP 完成基础 MCP 协议且可确定关闭", async (t) => {
+	const { lifecycle, port, token } = await startMcpServer(t)
 
 	const unauthorized = await httpRequest(port, {
 		headers: { Accept: "application/json, text/event-stream", "Content-Type": "application/json" },
@@ -566,4 +610,141 @@ test("原生无状态 HTTP 完成基础 MCP 协议且可确定关闭", async (t)
 	const rebound = http.createServer()
 	await new Promise((resolve) => rebound.listen(port, "127.0.0.1", resolve))
 	await new Promise((resolve) => rebound.close(resolve))
+})
+
+test("鉴权早于 body、slot 和 SDK 创建", async (t) => {
+	const { lifecycle, port, token } = await startMcpServer(t)
+	for (const authorization of ["Bearer wrong", `Bearer ${"c".repeat(64)}`]) {
+		const startedAt = Date.now()
+		const response = await headersOnlyRequest(port, {
+			Authorization: authorization,
+			Accept: "application/json, text/event-stream",
+			"Content-Type": "application/json",
+			"Content-Length": String(2 * 1024 * 1024),
+		})
+		assert.equal(response.status, 401)
+		assert.equal(response.headers["www-authenticate"], "Bearer")
+		assert.equal(response.headers["cache-control"], "no-store")
+		assert.ok(Date.now() - startedAt < 500)
+		assert.equal(lifecycle.activeRequestCount, 0)
+		await assertHttpHealthy(lifecycle, port, token)
+	}
+	const log = await readFile(join(httpFixture.dir, "http.log"), "utf8").catch(() => "")
+	assert.doesNotMatch(log, /Bearer wrong/)
+	assert.doesNotMatch(log, new RegExp("c".repeat(64)))
+})
+
+test("HTTP 路由、媒体类型和 body 上限失败后 server 仍可复用", async (t) => {
+	const { lifecycle, port, token } = await startMcpServer(t)
+	assert.equal(lifecycle.httpServer.headersTimeout, 10_000)
+	assert.equal(lifecycle.httpServer.requestTimeout, 15_000)
+	assert.equal(lifecycle.httpServer.maxConnections, 32)
+
+	const route = await httpRequest(port, { path: "/other", method: "POST" })
+	assert.equal(route.status, 404)
+	await assertHttpHealthy(lifecycle, port, token)
+	for (const method of ["GET", "PUT"]) {
+		const response = await httpRequest(port, { method })
+		assert.equal(response.status, 405)
+		assert.equal(response.headers.allow, "POST")
+		await assertHttpHealthy(lifecycle, port, token)
+	}
+
+	const baseHeaders = { Authorization: `Bearer ${token}` }
+	const unsupported = await httpRequest(port, {
+		headers: { ...baseHeaders, Accept: "application/json, text/event-stream" },
+		body: "{}",
+	})
+	assert.equal(unsupported.status, 415)
+	await assertHttpHealthy(lifecycle, port, token)
+	const unacceptable = await httpRequest(port, {
+		headers: { ...baseHeaders, Accept: "application/json", "Content-Type": "application/json" },
+		body: "{}",
+	})
+	assert.equal(unacceptable.status, 406)
+	await assertHttpHealthy(lifecycle, port, token)
+
+	const tooLarge = await headersOnlyRequest(port, {
+		...baseHeaders,
+		Accept: "application/json, text/event-stream",
+		"Content-Type": "application/json",
+		"Content-Length": String(1024 * 1024 + 1),
+	})
+	assert.equal(tooLarge.status, 413)
+	await assertHttpHealthy(lifecycle, port, token)
+	const chunked = await httpRequest(port, {
+		headers: {
+			...baseHeaders,
+			Accept: "application/json, text/event-stream",
+			"Content-Type": "application/json",
+			"Transfer-Encoding": "chunked",
+		},
+		body: "x".repeat(1024 * 1024 + 1),
+	})
+	assert.equal(chunked.status, 413)
+	await assertHttpHealthy(lifecycle, port, token)
+
+	const pending = http.request({
+		host: "127.0.0.1",
+		port,
+		path: "/mcp",
+		method: "POST",
+		headers: {
+			...baseHeaders,
+			Accept: "application/json, text/event-stream",
+			"Content-Type": "application/json",
+			"Content-Length": "10",
+		},
+	})
+	pending.on("error", () => {})
+	pending.flushHeaders()
+	for (let i = 0; i < 20 && lifecycle.activeRequestCount !== 1; i += 1) {
+		await new Promise((resolve) => setTimeout(resolve, 10))
+	}
+	assert.equal(lifecycle.activeRequestCount, 1)
+	pending.destroy()
+	for (let i = 0; i < 20 && lifecycle.activeRequestCount !== 0; i += 1) {
+		await new Promise((resolve) => setTimeout(resolve, 10))
+	}
+	await assertHttpHealthy(lifecycle, port, token)
+})
+
+test("JSON-RPC 和协议版本错误互不污染后续请求", async (t) => {
+	const { lifecycle, port, token } = await startMcpServer(t)
+	const invalidJson = await httpRequest(port, {
+		headers: {
+			Authorization: `Bearer ${token}`,
+			Accept: "application/json, text/event-stream",
+			"Content-Type": "application/json",
+		},
+		body: "{",
+	})
+	assert.equal(invalidJson.status, 400)
+	assert.equal(JSON.parse(invalidJson.body).error.code, -32700)
+	await assertHttpHealthy(lifecycle, port, token)
+
+	for (const message of [{ nope: true }, [TOOLS_LIST, TOOLS_LIST]]) {
+		const response = await mcpRequest(port, token, message)
+		assert.equal(response.status, 400)
+		assert.equal(response.headers["mcp-session-id"], undefined)
+		await assertHttpHealthy(lifecycle, port, token)
+	}
+
+	const unknown = await mcpRequest(port, token, { jsonrpc: "2.0", id: 5, method: "unknown" })
+	assert.equal(unknown.status, 200)
+	assert.equal(JSON.parse(unknown.body).error.code, -32601)
+	await assertHttpHealthy(lifecycle, port, token)
+	const badVersion = await mcpRequest(port, token, TOOLS_LIST, { "Mcp-Protocol-Version": "1900-01-01" })
+	assert.equal(badVersion.status, 400)
+	await assertHttpHealthy(lifecycle, port, token)
+	const initialized = await mcpRequest(port, token, { jsonrpc: "2.0", method: "notifications/initialized" })
+	assert.equal(initialized.status, 202)
+	assert.equal(initialized.headers["mcp-session-id"], undefined)
+
+	const requestListeners = lifecycle.httpServer.listenerCount("request")
+	for (let i = 0; i < 20; i += 1) {
+		assert.equal((await mcpRequest(port, token, [])).status, 400)
+	}
+	assert.equal(lifecycle.httpServer.listenerCount("request"), requestListeners)
+	await assertHttpHealthy(lifecycle, port, token)
 })
