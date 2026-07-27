@@ -64,8 +64,11 @@ test("平台 Token 要求 64 位十六进制且拒绝重复字符弱值", async 
 	delete process.env.MCP_TOKEN_WINDOWS
 	const { getLauncherConfig, validateToken } = await import(`../lib/config.mjs?platform-token=${Date.now()}`)
 	assert.equal(validateToken(PLATFORM_TOKEN), PLATFORM_TOKEN)
-	for (const weak of ["", "abc", "g".repeat(64), "a".repeat(63), "a".repeat(64), "A".repeat(64), "a".repeat(65)]) {
-		assert.throws(() => validateToken(weak), /64 位十六进制字符串/)
+	for (const invalid of ["", "abc", "g".repeat(64), "a".repeat(63), "a".repeat(65)]) {
+		assert.throws(() => validateToken(invalid), /64 位十六进制字符串/)
+	}
+	for (const weak of ["a".repeat(64), "A".repeat(64)]) {
+		assert.throws(() => validateToken(weak), /不能全部使用同一字符/)
 	}
 	for (const platform of ["linux", "windows"]) {
 		const key = `MCP_TOKEN_${platform.toUpperCase()}`
