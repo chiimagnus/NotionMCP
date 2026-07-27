@@ -12,7 +12,7 @@ NotionMCP 是一个单进程、无 Session 的 MCP server：Node 在 `127.0.0.1`
 
 需要 Node.js 20.11 或更高版本。复制 `.env.example` 为 `.env`，填写当前平台配置，执行 `npm install`，再运行 `up.sh`（macOS/Linux）或 `up.ps1`（Windows）。
 
-运行日志写入有界的 `mcp.log`。修改 `.env` 或增删 skill 后需要重启服务。
+开发和故障诊断日志以 JSON Lines 写入有界的 `mcp.log`：保留服务生命周期、工具结果、错误消息、调用栈和失败 stderr 尾部，自动脱敏 Token，不记录完整命令、stdout、文件内容或请求正文。修改 `.env` 或增删 skill 后需要重启服务。
 
 ## 从旧版本迁移
 

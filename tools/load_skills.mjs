@@ -45,9 +45,11 @@ function findSkills(dir, relPath = "") {
 
 	if (isSkill) {
 		let front = {}
-		try {
-			front = parseFrontmatter(readFileSync(join(dir, "SKILL.md"), "utf-8"))
-		} catch {}
+			try {
+				front = parseFrontmatter(readFileSync(join(dir, "SKILL.md"), "utf-8"))
+			} catch (error) {
+				log("warning", "load_skills", "frontmatter_read_failed", { error })
+			}
 		return [
 			{
 				key: relPath || basename(dir),
@@ -61,7 +63,8 @@ function findSkills(dir, relPath = "") {
 	let entries = []
 	try {
 		entries = readdirSync(dir, { withFileTypes: true })
-	} catch {
+	} catch (error) {
+		log("warning", "load_skills", "catalog_scan_failed", { error })
 		return []
 	}
 
@@ -75,11 +78,7 @@ function findSkills(dir, relPath = "") {
 }
 
 function loadCatalog() {
-	try {
-		return findSkills(SKILLS_ROOT).sort((a, b) => a.key.localeCompare(b.key))
-	} catch {
-		return []
-	}
+	return findSkills(SKILLS_ROOT).sort((a, b) => a.key.localeCompare(b.key))
 }
 
 // ponytail: catalog 是启动快照；新增或删除 skill 后重启服务，不为单用户目录增加 watcher。
@@ -112,12 +111,13 @@ export const definition = {
 export async function call(args, context = {}) {
 	const key = args && args.name
 	if (!key || typeof key !== "string") {
+		log("error", "load_skills", "finished", { outcome: "invalid_input", message: "Missing required name" })
 		return { content: [{ type: "text", text: "\u7f3a\u5c11\u5fc5\u586b\u53c2\u6570 name" }], isError: true }
 	}
 	const skill = catalogByKey[key]
 	if (!skill) {
 		const available = catalog.map((s) => s.key).join(", ") || "(\u65e0)"
-		log("warning", "load_skills", "finished", { outcome: "not_found" })
+		log("warning", "load_skills", "finished", { outcome: "not_found", message: `Skill not found: ${key}` })
 		return {
 			content: [{ type: "text", text: `\u672a\u627e\u5230\u6280\u80fd "${key}"\u3002\u53ef\u7528\u6280\u80fd key\uff1a${available}` }],
 			isError: true,
@@ -126,6 +126,7 @@ export async function call(args, context = {}) {
 	let content
 	try {
 		if (context.signal?.aborted) {
+			log("warning", "load_skills", "finished", { outcome: "cancelled", message: "Skill read cancelled" })
 			return { content: [{ type: "text", text: "读取已取消" }], isError: true }
 		}
 		content = readFileSync(join(skill.dir, "SKILL.md"), "utf-8")
