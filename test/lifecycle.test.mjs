@@ -10,7 +10,7 @@ import { pathToFileURL } from "node:url"
 import test, { after } from "node:test"
 
 const ROOT = join(import.meta.dirname, "..")
-const PLATFORM_TOKEN = "a".repeat(64)
+const PLATFORM_TOKEN = "0123456789abcdef".repeat(4)
 
 function waitForExit(child, timeoutMs = 5_000) {
 	return new Promise((resolve, reject) => {
@@ -41,7 +41,7 @@ async function configFile(dir) {
 	return file
 }
 
-test("平台 Token 只接受 64 位十六进制字符串", async (t) => {
+test("平台 Token 要求 64 位十六进制且拒绝重复字符弱值", async (t) => {
 	const dir = await mkdtemp(join(tmpdir(), "notionmcp-config-"))
 	t.after(() => rm(dir, { recursive: true, force: true }))
 	const config = await configFile(dir)
@@ -63,8 +63,8 @@ test("平台 Token 只接受 64 位十六进制字符串", async (t) => {
 	delete process.env.MCP_TOKEN_LINUX
 	delete process.env.MCP_TOKEN_WINDOWS
 	const { getLauncherConfig, validateToken } = await import(`../lib/config.mjs?platform-token=${Date.now()}`)
-	assert.equal(validateToken("A".repeat(64)), "A".repeat(64))
-	for (const weak of ["", "abc", "g".repeat(64), "a".repeat(63), "a".repeat(65)]) {
+	assert.equal(validateToken(PLATFORM_TOKEN), PLATFORM_TOKEN)
+	for (const weak of ["", "abc", "g".repeat(64), "a".repeat(63), "a".repeat(64), "A".repeat(64), "a".repeat(65)]) {
 		assert.throws(() => validateToken(weak), /64 位十六进制字符串/)
 	}
 	for (const platform of ["linux", "windows"]) {
