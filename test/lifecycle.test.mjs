@@ -168,6 +168,125 @@ function isAlive(pid) {
 	}
 }
 
+function quoteShellArg(value) {
+	const text = String(value)
+	if (process.platform === "win32") return `'${text.replaceAll("'", "''")}'`
+	return `'${text.replaceAll("'", "'\"'\"'")}'`
+}
+
+function nodeCommand(script, ...args) {
+	return [process.execPath, script, ...args].map(quoteShellArg).join(" ")
+}
+
+async function runCommandTool(config, args, abortAfterMs) {
+	const moduleUrl = pathToFileURL(join(ROOT, "tools", "run_command.mjs")).href
+	const source = `
+		const { call } = await import(${JSON.stringify(moduleUrl)})
+		const controller = new AbortController()
+		const abortAfter = ${JSON.stringify(abortAfterMs)}
+		if (abortAfter === 0) controller.abort()
+		else if (abortAfter) setTimeout(() => controller.abort(), abortAfter)
+		const result = await call(${JSON.stringify(args)}, { signal: controller.signal })
+		process.stdout.write(JSON.stringify(result))
+	`
+	const child = spawn(process.execPath, ["--input-type=module", "-e", source], {
+		stdio: ["ignore", "pipe", "pipe"],
+		env: {
+			...process.env,
+			MCP_CONFIG_FILE: config,
+			MCP_LOG_FILE: join(config, "..", "command.log"),
+			MCP_MAX_OUTPUT_CHARS: "32",
+		},
+	})
+	let stdout = ""
+	let stderr = ""
+	child.stdout.on("data", (chunk) => (stdout += chunk))
+	child.stderr.on("data", (chunk) => (stderr += chunk))
+	const code = await waitForExit(child, 10_000)
+	assert.equal(code, 0, stderr)
+	return JSON.parse(stdout)
+}
+
+async function assertDead(...pids) {
+	for (let i = 0; i < 100 && pids.some(isAlive); i += 1) {
+		await new Promise((resolve) => setTimeout(resolve, 50))
+	}
+	for (const pid of pids) assert.equal(isAlive(pid), false, `进程 ${pid} 不应残留`)
+}
+
+test("run_command 在 data 阶段限制输出并保留拆分的 UTF-8", async (t) => {
+	const dir = await mkdtemp(join(tmpdir(), "notionmcp-output-"))
+	t.after(() => rm(dir, { recursive: true, force: true }))
+	const config = await configFile(dir, await freePort(), await freePort())
+	const helper = join(dir, "output.cjs")
+	await writeFile(
+		helper,
+		`const bytes=Buffer.from("中");process.stdout.write(bytes.subarray(0,1));setTimeout(()=>{process.stdout.write(bytes.subarray(1));process.stdout.write("x".repeat(200));process.stderr.write("y".repeat(201))},10)\n`,
+	)
+
+	const result = await runCommandTool(config, { command: nodeCommand(helper) })
+	const text = result.content[0].text
+	assert.match(text, /中x+/)
+	assert.doesNotMatch(text, /\uFFFD/)
+	assert.equal(text.match(/\.\.\.\[truncated, 169 more chars\]/g)?.length, 2)
+})
+
+test("run_command 的 Abort、timeout 和退出兜底都清理整棵进程树", async (t) => {
+	const dir = await mkdtemp(join(tmpdir(), "notionmcp-tree-"))
+	t.after(() => rm(dir, { recursive: true, force: true }))
+	const config = await configFile(dir, await freePort(), await freePort())
+	const helper = join(dir, "tree.cjs")
+	await writeFile(
+		helper,
+		`const{spawn}=require("node:child_process");const{writeFileSync}=require("node:fs");const mode=process.argv[2];if(mode==="grand"){writeFileSync(process.argv[3],String(process.pid));setInterval(()=>{},1000)}else{writeFileSync(process.argv[3],String(process.pid));spawn(process.execPath,[__filename,"grand",process.argv[4]],{stdio:mode==="inherit"?["ignore","inherit","inherit"]:"ignore"});if(mode==="inherit")process.exit(0);setInterval(()=>{},1000)}\n`,
+	)
+
+	for (const [kind, abortAfterMs, timeoutMs] of [
+		["abort", 200, 5_000],
+		["timeout", undefined, 200],
+	]) {
+		const parentFile = join(dir, `${kind}-parent.pid`)
+		const grandFile = join(dir, `${kind}-grand.pid`)
+		const pending = runCommandTool(
+			config,
+			{ command: nodeCommand(helper, "tree", parentFile, grandFile), timeoutMs },
+			abortAfterMs,
+		)
+		const parentPid = await waitForPid(parentFile)
+		const grandPid = await waitForPid(grandFile)
+		const result = await pending
+		assert.match(result.content[0].text, kind === "abort" ? /cancelled/ : /timed out/)
+		await assertDead(parentPid, grandPid)
+	}
+
+	const inheritedPidFile = join(dir, "inherit-grand.pid")
+	const startedAt = Date.now()
+	const inherited = await runCommandTool(config, {
+		command: nodeCommand(helper, "inherit", join(dir, "inherit-parent.pid"), inheritedPidFile),
+		timeoutMs: 8_000,
+	})
+	const inheritedPid = await waitForPid(inheritedPidFile)
+	assert.match(inherited.content[0].text, /exit code: 0/)
+	assert.ok(Date.now() - startedAt < 5_000, "继承管道不应一直挂到命令 timeout")
+	await assertDead(inheritedPid)
+})
+
+test("run_command 严格校验 timeout，预取消时不创建进程", async (t) => {
+	const dir = await mkdtemp(join(tmpdir(), "notionmcp-command-input-"))
+	t.after(() => rm(dir, { recursive: true, force: true }))
+	const config = await configFile(dir, await freePort(), await freePort())
+	for (const timeoutMs of [0, -1, 1.5, "1"]) {
+		const result = await runCommandTool(config, { command: "ignored", timeoutMs })
+		assert.match(result.content[0].text, /timeoutMs must be an integer/)
+	}
+	const marker = join(dir, "should-not-exist")
+	const helper = join(dir, "touch.cjs")
+	await writeFile(helper, `require("node:fs").writeFileSync(process.argv[2],"created")\n`)
+	const result = await runCommandTool(config, { command: nodeCommand(helper, marker) }, 0)
+	assert.match(result.content[0].text, /cancelled/)
+	await assert.rejects(readFile(marker))
+})
+
 test("stdio 任一方向关闭都会结束 exec-server 会话", async (t) => {
 	const dir = await mkdtemp(join(tmpdir(), "notionmcp-lifecycle-"))
 	t.after(() => rm(dir, { recursive: true, force: true }))
