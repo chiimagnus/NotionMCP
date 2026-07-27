@@ -67,7 +67,7 @@ Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
 
 按 `Ctrl + C` 停止。
 
-supergateway 或 auth-proxy 中途意外退出时，启动器会每 5 秒重试，不需要手动重新执行 `up.ps1`。stdio 会话关闭时，其 exec-server 会自行退出；不再定时重启整条服务。运行过程写入仓库根目录的 `up.log`。
+supergateway 或 auth-proxy 中途意外退出时，启动器会每 5 秒重试，不需要手动重新执行 `up.ps1`。MCP 使用无状态 HTTP 请求，不会因 Session 过期而离线。运行过程写入仓库根目录的 `up.log`。
 
 ## Notion 配置
 

@@ -51,7 +51,7 @@ chmod +x ./up.sh
 ./up.sh
 ```
 
-保持终端运行，按 `Ctrl + C` 停止。不要暴露 8001。supergateway 或 auth-proxy 中途意外退出时，启动器会每 5 秒重试，不需要手动重新执行 `up.sh`。stdio 会话关闭时，其 exec-server 会自行退出；不再定时重启整条服务。运行过程写入仓库根目录的 `up.log`。启动成功后，在 Notion 中填写：
+保持终端运行，按 `Ctrl + C` 停止。不要暴露 8001。supergateway 或 auth-proxy 中途意外退出时，启动器会每 5 秒重试，不需要手动重新执行 `up.sh`。MCP 使用无状态 HTTP 请求，不会因 Session 过期而离线。运行过程写入仓库根目录的 `up.log`。启动成功后，在 Notion 中填写：
 
 | 字段 | 填什么 |
 | --- | --- |
