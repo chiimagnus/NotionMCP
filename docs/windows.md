@@ -2,82 +2,41 @@
 
 ## 前置条件
 
-安装 Node.js、PowerShell 7、Tailscale CLI。SVG 图片需要额外安装 ImageMagick（`magick`），位图图片不需要额外依赖。
+安装 Node.js 20.11+、PowerShell 7 和 Tailscale CLI。SVG 需要 ImageMagick（`magick`）；位图不需要额外工具。
 
 ## 配置
 
-在仓库根目录执行：
-
 ```pwsh
 Copy-Item .env.example .env
-```
-
-编辑 `.env`，至少设置：
-
-```dotenv
-MCP_SANDBOX_DIR_WINDOWS=~/AI-Share
-MCP_SKILLS_DIR_WINDOWS=~/.codex/skills
-MCP_TOKEN_WINDOWS=请替换为随机生成的64位十六进制字符串
-```
-
-`.env` 已被 Git 忽略，但其中的 Token 是明文；不要提交、分享或复制到其他文件。
-
-## 一次性准备
-
-### 0. 安装依赖
-
-```pwsh
-npm install
-```
-
-启动器只使用本地安装并由 `package-lock.json` 锁定的 supergateway；缺少依赖时会直接报错，不再临时联网下载另一份。
-
-### 1. 生成 Token
-
-```pwsh
 node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 ```
 
-把输出同时填入 `.env` 的 `MCP_TOKEN_WINDOWS` 和 Notion 的 Token 字段。
+编辑 `.env`：
 
-如果 PowerShell 7 禁止执行脚本，先执行：
-
-```pwsh
-Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
+```dotenv
+MCP_PORT=8000
+MCP_SANDBOX_DIR_WINDOWS=~/AI-Share
+MCP_SKILLS_DIR_WINDOWS=~/.codex/skills
+MCP_TOKEN_WINDOWS=粘贴刚生成的64位十六进制字符串
 ```
+
+`.env` 已被 Git 忽略，但 Token 是明文；不要提交或分享。把同一个裸 Token 填入 Notion，不要手动添加 `Bearer`。
 
 ## 启动
 
-在仓库根目录打开 PowerShell 7（`pwsh`），执行：
-
 ```pwsh
+npm install
 & .\up.ps1
 ```
 
-首次使用 Tailscale 时，在管理后台开启 HTTPS 证书和 Funnel 权限。不要暴露 8001。
+保持终端运行，按 `Ctrl+C` 正常停止。服务只监听 `127.0.0.1:8000`；Tailscale Funnel 对外提供 `/mcp`。修改 `.env` 或增删 skill 后需要重启。
 
-看到下面的成功提示后，保持 PowerShell 7 窗口运行：
+Notion 中选择 **Add connection → Custom MCP server**：
 
-```text
-✅ 8001 起来了
-✅ 8000 起来了
-✅ 鉴权生效（无 token → 401）
-✅ Funnel 已指向 8000
-```
-
-按 `Ctrl + C` 停止。
-
-supergateway 或 auth-proxy 中途意外退出时，启动器会每 5 秒重试，不需要手动重新执行 `up.ps1`。MCP 使用无状态 HTTP 请求，不会因 Session 过期而离线。运行过程写入有界的 `mcp.log`。
-
-## Notion 配置
-
-Agent → **Add connection → Custom MCP server**
-
-| 字段 | 填什么 |
+| 字段 | 值 |
 | --- | --- |
-| Server URL | `https://<你的设备名>.<你的tailnet名>.ts.net/mcp` |
-| 鉴权方式 | **Bearer Token**，前缀选 `Bearer` |
-| Token | `.env` 中 `MCP_TOKEN_WINDOWS` 的值，不要再手动加 `Bearer` |
-| 权限 | 按需选择 |
+| Server URL | `https://<设备名>.<tailnet名>.ts.net/mcp` |
+| 鉴权方式 | Bearer Token |
+| Token | `.env` 中 `MCP_TOKEN_WINDOWS` 的裸值 |
 
-Token 泄露等价于允许公网调用当前用户可执行的命令；重要数据应另行备份。
+默认启动器独占本设备 Funnel 配置，正常关闭会 reset 本设备的所有 Funnel route。需要共享 route 时请自行编排。异常断电后若 route 残留，运行 `tailscale funnel reset`。

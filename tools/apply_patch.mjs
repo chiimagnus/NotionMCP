@@ -122,13 +122,17 @@ async function applyOperation(op) {
 	}
 }
 
-export async function call(args) {
+export async function call(args, context = {}) {
 	const operations = (args && args.operations) || []
 	if (!Array.isArray(operations) || operations.length === 0) {
 		return { content: [{ type: "text", text: "Error: 'operations' must be a non-empty array" }], isError: true }
 	}
 	const results = []
 	for (const op of operations) {
+		if (context.signal?.aborted) {
+			results.push({ type: op?.type, path: op?.path, status: "failed", output: "Cancelled before operation" })
+			break
+		}
 		const result = await applyOperation(op)
 		results.push(result)
 		auditLog("apply_patch", "operation", { operation: result.type || "unknown", outcome: result.status })
@@ -138,6 +142,6 @@ export async function call(args) {
 		.join("\n")
 	const hasFailure = results.some((r) => r.status === "failed")
 	const firstPath = operations[0] && operations[0].path
-	const agentsMdBlock = firstPath ? getAgentsMdBlock(dirname(resolvePath(firstPath))) : ""
+	const agentsMdBlock = firstPath && !context.signal?.aborted ? getAgentsMdBlock(dirname(resolvePath(firstPath))) : ""
 	return { content: [{ type: "text", text: text + agentsMdBlock }], isError: hasFailure }
 }

@@ -5,7 +5,7 @@ import http from "node:http"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { pathToFileURL } from "node:url"
-import test from "node:test"
+import test, { after } from "node:test"
 
 const ROOT = join(import.meta.dirname, "..")
 const PLATFORM_TOKEN = "a".repeat(64)
@@ -20,35 +20,12 @@ function waitForExit(child, timeoutMs = 5_000) {
 	})
 }
 
-function request(port, token) {
-	return new Promise((resolve) => {
-		const req = http.get(
-			{ host: "127.0.0.1", port, path: "/mcp", headers: token ? { Authorization: `Bearer ${token}` } : {} },
-			(res) => {
-				res.resume()
-				res.once("end", () => resolve(res.statusCode))
-				res.once("error", () => resolve(0))
-			},
-		)
-		req.once("error", () => resolve(0))
-	})
-}
-
-async function freePort() {
-	const server = http.createServer()
-	await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve))
-	const { port } = server.address()
-	await new Promise((resolve) => server.close(resolve))
-	return port
-}
-
-async function configFile(dir, proxyPort, upstreamPort) {
+async function configFile(dir) {
 	const file = join(dir, ".env")
 	await writeFile(
 		file,
 		[
-			`MCP_PROXY_PORT=${proxyPort}`,
-			`MCP_UPSTREAM_PORT=${upstreamPort}`,
+			"MCP_PORT=8000",
 			`MCP_SANDBOX_DIR_MACOS=${dir}`,
 			`MCP_SKILLS_DIR_MACOS=${dir}`,
 			`MCP_SANDBOX_DIR_LINUX=${dir}`,
@@ -62,10 +39,10 @@ async function configFile(dir, proxyPort, upstreamPort) {
 	return file
 }
 
-test("Linux 和 Windows 直接从 .env 读取 Token，并拒绝示例占位符", async (t) => {
+test("平台 Token 只接受 64 位十六进制字符串", async (t) => {
 	const dir = await mkdtemp(join(tmpdir(), "notionmcp-config-"))
 	t.after(() => rm(dir, { recursive: true, force: true }))
-	const config = await configFile(dir, await freePort(), await freePort())
+	const config = await configFile(dir)
 	const previousConfig = process.env.MCP_CONFIG_FILE
 	const previousTokens = {
 		MCP_TOKEN_LINUX: process.env.MCP_TOKEN_LINUX,
@@ -83,12 +60,18 @@ test("Linux 和 Windows 直接从 .env 读取 Token，并拒绝示例占位符",
 	process.env.MCP_CONFIG_FILE = config
 	delete process.env.MCP_TOKEN_LINUX
 	delete process.env.MCP_TOKEN_WINDOWS
-	const { getLauncherConfig } = await import(`../lib/config.mjs?platform-token=${Date.now()}`)
+	const { getLauncherConfig, validateToken } = await import(`../lib/config.mjs?platform-token=${Date.now()}`)
+	assert.equal(validateToken("A".repeat(64)), "A".repeat(64))
+	for (const weak of ["", "abc", "g".repeat(64), "a".repeat(63), "a".repeat(65)]) {
+		assert.throws(() => validateToken(weak), /64 位十六进制字符串/)
+	}
 	for (const platform of ["linux", "windows"]) {
 		const key = `MCP_TOKEN_${platform.toUpperCase()}`
-		assert.equal(getLauncherConfig(platform).token, PLATFORM_TOKEN)
+		const platformConfig = getLauncherConfig(platform)
+		assert.equal(platformConfig.port, 8000)
+		assert.equal(platformConfig.token, PLATFORM_TOKEN)
 		process.env[key] = "请替换为随机生成的64位十六进制字符串"
-		assert.throws(() => getLauncherConfig(platform), new RegExp(`请先替换 ${key}`))
+		assert.throws(() => getLauncherConfig(platform), new RegExp(`${key} 必须是 64 位十六进制字符串`))
 		delete process.env[key]
 	}
 })
@@ -96,7 +79,7 @@ test("Linux 和 Windows 直接从 .env 读取 Token，并拒绝示例占位符",
 test("审计日志轮转有界、单行有效且忽略敏感字段", async (t) => {
 	const dir = await mkdtemp(join(tmpdir(), "notionmcp-log-"))
 	t.after(() => rm(dir, { recursive: true, force: true }))
-	const config = await configFile(dir, await freePort(), await freePort())
+	const config = await configFile(dir)
 	const logFile = join(dir, "mcp.log")
 	const backupFile = `${logFile}.1`
 	const handle = await open(logFile, "w")
@@ -150,16 +133,8 @@ test("审计日志轮转有界、单行有效且忽略敏感字段", async (t) =
 
 test("旧日志 writer 已从运行路径删除", async () => {
 	const launcher = await readFile(join(ROOT, "lib", "up.mjs"), "utf8")
-	const rpc = await readFile(join(ROOT, "lib", "rpc.mjs"), "utf8")
 	assert.doesNotMatch(launcher, /UP_LOG_FILE|appendFile\(/)
-	assert.doesNotMatch(rpc, /appendFileSync|export function log/)
-})
-
-test("网关使用无状态 HTTP，不保留会过期的 Session", async () => {
-	const launcher = await readFile(join(ROOT, "lib", "up.mjs"), "utf8")
-	const config = await readFile(join(ROOT, "lib", "config.mjs"), "utf8")
-	assert.doesNotMatch(launcher, /--stateful|--sessionTimeout/)
-	assert.doesNotMatch(config, /MCP_SESSION_TIMEOUT_MS|sessionTimeoutMs/)
+	await assert.rejects(readFile(join(ROOT, "lib", "rpc.mjs")), { code: "ENOENT" })
 })
 
 async function waitForPid(file) {
@@ -302,7 +277,7 @@ async function runRasterizerTool(config, command, args, { abortAfterMs, timeoutM
 test("read_image 只读取普通文件并对输入输出施加 10 MiB 上限", async (t) => {
 	const dir = await mkdtemp(join(tmpdir(), "notionmcp-image-"))
 	t.after(() => rm(dir, { recursive: true, force: true }))
-	const config = await configFile(dir, await freePort(), await freePort())
+	const config = await configFile(dir)
 	const small = join(dir, "small.png")
 	await writeFile(small, Buffer.from([0x89, 0x50, 0x4e, 0x47]))
 	const ok = await runImageTool(config, { path: small })
@@ -327,7 +302,7 @@ test("read_image 只读取普通文件并对输入输出施加 10 MiB 上限", a
 test("read_image 严格校验 maxSize，预取消不读取文件", async (t) => {
 	const dir = await mkdtemp(join(tmpdir(), "notionmcp-image-input-"))
 	t.after(() => rm(dir, { recursive: true, force: true }))
-	const config = await configFile(dir, await freePort(), await freePort())
+	const config = await configFile(dir)
 	const image = join(dir, "small.png")
 	await writeFile(image, "image")
 	for (const maxSize of [0, -1, 1.5, "1", 2_001]) {
@@ -341,7 +316,7 @@ test("read_image 严格校验 maxSize，预取消不读取文件", async (t) => 
 test("rasterizer 的 stderr、timeout 与 Abort 均有界且清理进程树", async (t) => {
 	const dir = await mkdtemp(join(tmpdir(), "notionmcp-rasterizer-"))
 	t.after(() => rm(dir, { recursive: true, force: true }))
-	const config = await configFile(dir, await freePort(), await freePort())
+	const config = await configFile(dir)
 	const helper = join(dir, "rasterizer.cjs")
 	await writeFile(
 		helper,
@@ -376,7 +351,7 @@ test("rasterizer 的 stderr、timeout 与 Abort 均有界且清理进程树", as
 test("SVG 栅格化无论成功失败都删除临时目录", async (t) => {
 	const dir = await mkdtemp(join(tmpdir(), "notionmcp-svg-"))
 	t.after(() => rm(dir, { recursive: true, force: true }))
-	const config = await configFile(dir, await freePort(), await freePort())
+	const config = await configFile(dir)
 	const svg = join(dir, "small.svg")
 	await writeFile(svg, `<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"/>`)
 	const before = new Set((await readdir(tmpdir())).filter((name) => name.startsWith("svg-thumb-")))
@@ -388,7 +363,7 @@ test("SVG 栅格化无论成功失败都删除临时目录", async (t) => {
 test("run_command 在 data 阶段限制输出并保留拆分的 UTF-8", async (t) => {
 	const dir = await mkdtemp(join(tmpdir(), "notionmcp-output-"))
 	t.after(() => rm(dir, { recursive: true, force: true }))
-	const config = await configFile(dir, await freePort(), await freePort())
+	const config = await configFile(dir)
 	const helper = join(dir, "output.cjs")
 	await writeFile(
 		helper,
@@ -405,7 +380,7 @@ test("run_command 在 data 阶段限制输出并保留拆分的 UTF-8", async (t
 test("run_command 的 Abort、timeout 和退出兜底都清理整棵进程树", async (t) => {
 	const dir = await mkdtemp(join(tmpdir(), "notionmcp-tree-"))
 	t.after(() => rm(dir, { recursive: true, force: true }))
-	const config = await configFile(dir, await freePort(), await freePort())
+	const config = await configFile(dir)
 	const helper = join(dir, "tree.cjs")
 	await writeFile(
 		helper,
@@ -445,7 +420,7 @@ test("run_command 的 Abort、timeout 和退出兜底都清理整棵进程树", 
 test("run_command 严格校验 timeout，预取消时不创建进程", async (t) => {
 	const dir = await mkdtemp(join(tmpdir(), "notionmcp-command-input-"))
 	t.after(() => rm(dir, { recursive: true, force: true }))
-	const config = await configFile(dir, await freePort(), await freePort())
+	const config = await configFile(dir)
 	for (const timeoutMs of [0, -1, 1.5, "1"]) {
 		const result = await runCommandTool(config, { command: "ignored", timeoutMs })
 		assert.match(result.content[0].text, /timeoutMs must be an integer/)
@@ -458,85 +433,137 @@ test("run_command 严格校验 timeout，预取消时不创建进程", async (t)
 	await assert.rejects(readFile(marker))
 })
 
-test("stdio 任一方向关闭都会结束 exec-server 会话", async (t) => {
-	const dir = await mkdtemp(join(tmpdir(), "notionmcp-lifecycle-"))
-	t.after(() => rm(dir, { recursive: true, force: true }))
-	const config = await configFile(dir, await freePort(), await freePort())
-
-	for (const closedSide of ["stdin", "stdout"]) {
-		const child = spawn(process.execPath, [join(ROOT, "lib", "exec-server.mjs")], {
-			stdio: ["pipe", "pipe", "pipe"],
-			env: { ...process.env, MCP_CONFIG_FILE: config },
-		})
-		t.after(() => child.kill())
-
-		if (closedSide === "stdin") {
-			child.stdin.end()
-		} else {
-			child.stdout.destroy()
-			child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" })}\n`)
-		}
-
-		assert.equal(await waitForExit(child), 0, `${closedSide} 关闭应当正常结束会话`)
-	}
-})
-
-test("exec-server 退出会清理正在运行的命令树", async (t) => {
+test("Node 退出兜底会清理正在运行的命令树", async (t) => {
 	const dir = await mkdtemp(join(tmpdir(), "notionmcp-command-"))
 	t.after(() => rm(dir, { recursive: true, force: true }))
-	const config = await configFile(dir, await freePort(), await freePort())
+	const config = await configFile(dir)
 	const helper = join(dir, "long-running.cjs")
 	const pidFile = join(dir, "pid")
 	await writeFile(helper, `require("node:fs").writeFileSync(process.argv[2], String(process.pid)); setInterval(() => {}, 1000)\n`)
-
-	const child = spawn(process.execPath, [join(ROOT, "lib", "exec-server.mjs")], {
-		stdio: ["pipe", "ignore", "ignore"],
-		env: { ...process.env, MCP_CONFIG_FILE: config },
+	const toolUrl = pathToFileURL(join(ROOT, "tools", "run_command.mjs")).href
+	const source = `
+		const { call } = await import(${JSON.stringify(toolUrl)})
+		void call({ command: ${JSON.stringify(nodeCommand(helper, pidFile))} })
+		setTimeout(() => process.exit(0), 200)
+	`
+	const child = spawn(process.execPath, ["--input-type=module", "-e", source], {
+		stdio: "ignore",
+		env: {
+			...process.env,
+			MCP_CONFIG_FILE: config,
+			MCP_LOG_FILE: join(dir, "exit.log"),
+		},
 	})
 	t.after(() => child.kill())
-	child.stdin.write(
-		`${JSON.stringify({
-			jsonrpc: "2.0",
-			id: 1,
-			method: "tools/call",
-			params: { name: "run_command", arguments: { command: `node ${JSON.stringify(helper)} ${JSON.stringify(pidFile)}` } },
-		})}\n`,
-	)
 
 	const commandPid = await waitForPid(pidFile)
-	child.stdin.end()
 	assert.equal(await waitForExit(child), 0)
-	for (let i = 0; i < 20 && isAlive(commandPid); i += 1) {
-		await new Promise((resolve) => setTimeout(resolve, 50))
-	}
-	assert.equal(isAlive(commandPid), false, `命令子进程 ${commandPid} 不应残留`)
+	await assertDead(commandPid)
 })
 
-test("上游连接中断不会打死 auth-proxy", async (t) => {
-	const dir = await mkdtemp(join(tmpdir(), "notionmcp-proxy-"))
-	t.after(() => rm(dir, { recursive: true, force: true }))
-	const upstreamPort = await freePort()
-	const proxyPort = await freePort()
-	const config = await configFile(dir, proxyPort, upstreamPort)
-	const upstream = http.createServer((_req, res) => {
-		res.writeHead(200)
-		res.write("partial")
-		res.socket.destroy()
-	})
-	await new Promise((resolve) => upstream.listen(upstreamPort, "127.0.0.1", resolve))
-	t.after(() => upstream.close())
+let httpFixture
 
-	const proxy = spawn(process.execPath, [join(ROOT, "lib", "auth-proxy.mjs")], {
-		stdio: "ignore",
-		env: { ...process.env, MCP_CONFIG_FILE: config, MCP_TOKEN: "test-token" },
-	})
-	t.after(() => proxy.kill())
-
-	for (let i = 0; i < 20 && (await request(proxyPort)) !== 401; i += 1) {
-		await new Promise((resolve) => setTimeout(resolve, 50))
+async function getHttpFixture() {
+	if (httpFixture) return httpFixture
+	const dir = await mkdtemp(join(tmpdir(), "notionmcp-http-"))
+	const config = await configFile(dir)
+	const previous = {
+		config: process.env.MCP_CONFIG_FILE,
+		log: process.env.MCP_LOG_FILE,
 	}
-	assert.equal(await request(proxyPort), 401, "代理应已启动")
-	await request(proxyPort, "test-token")
-	assert.equal(proxy.exitCode, null, "上游中断后代理仍应存活")
-	assert.equal(await request(proxyPort), 401, "代理中断后仍应继续服务")
+	process.env.MCP_CONFIG_FILE = config
+	process.env.MCP_LOG_FILE = join(dir, "http.log")
+	const module = await import(`../lib/mcp-http.mjs?test=${Date.now()}`)
+	httpFixture = { dir, module, previous }
+	return httpFixture
+}
+
+after(async () => {
+	if (!httpFixture) return
+	await rm(httpFixture.dir, { recursive: true, force: true })
+	if (httpFixture.previous.config === undefined) delete process.env.MCP_CONFIG_FILE
+	else process.env.MCP_CONFIG_FILE = httpFixture.previous.config
+	if (httpFixture.previous.log === undefined) delete process.env.MCP_LOG_FILE
+	else process.env.MCP_LOG_FILE = httpFixture.previous.log
+})
+
+function httpRequest(port, { path = "/mcp", method = "POST", headers = {}, body = "" } = {}) {
+	return new Promise((resolve, reject) => {
+		const req = http.request({ host: "127.0.0.1", port, path, method, headers }, (res) => {
+			const chunks = []
+			res.on("data", (chunk) => chunks.push(chunk))
+			res.once("end", () => {
+				resolve({
+					status: res.statusCode,
+					headers: res.headers,
+					body: Buffer.concat(chunks).toString("utf8"),
+				})
+			})
+		})
+		req.once("error", reject)
+		req.end(body)
+	})
+}
+
+function mcpRequest(port, token, message, extraHeaders = {}) {
+	return httpRequest(port, {
+		headers: {
+			Authorization: `Bearer ${token}`,
+			Accept: "application/json, text/event-stream",
+			"Content-Type": "application/json",
+			"Mcp-Protocol-Version": "2025-03-26",
+			...extraHeaders,
+		},
+		body: JSON.stringify(message),
+	})
+}
+
+test("原生无状态 HTTP 完成基础 MCP 协议且可确定关闭", async (t) => {
+	const { module } = await getHttpFixture()
+	const token = "b".repeat(64)
+	const lifecycle = module.createMcpHttpServer({ port: 0, token })
+	t.after(() => lifecycle.shutdown())
+	const address = await lifecycle.listen()
+	const port = address.port
+
+	const unauthorized = await httpRequest(port, {
+		headers: { Accept: "application/json, text/event-stream", "Content-Type": "application/json" },
+		body: "{}",
+	})
+	assert.equal(unauthorized.status, 401)
+
+	const messages = [
+		{
+			jsonrpc: "2.0",
+			id: 1,
+			method: "initialize",
+			params: {
+				protocolVersion: "2025-03-26",
+				capabilities: {},
+				clientInfo: { name: "test", version: "1" },
+			},
+		},
+		{ jsonrpc: "2.0", method: "notifications/initialized" },
+		{ jsonrpc: "2.0", id: 2, method: "ping" },
+		{ jsonrpc: "2.0", id: 3, method: "tools/list", params: {} },
+		{ jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "missing", arguments: {} } },
+	]
+	const responses = []
+	for (const message of messages) {
+		const response = await mcpRequest(port, token, message)
+		responses.push(response)
+		assert.equal(response.headers["mcp-session-id"], undefined)
+	}
+	assert.equal(responses[0].status, 200)
+	assert.equal(JSON.parse(responses[0].body).result.serverInfo.name, "notionmcp")
+	assert.equal(responses[1].status, 202)
+	assert.equal(JSON.parse(responses[2].body).result !== undefined, true)
+	assert.equal(JSON.parse(responses[3].body).result.tools.length, 4)
+	assert.equal(JSON.parse(responses[4].body).error.code, -32602)
+	assert.equal(lifecycle.activeRequestCount, 0)
+
+	await lifecycle.shutdown()
+	const rebound = http.createServer()
+	await new Promise((resolve) => rebound.listen(port, "127.0.0.1", resolve))
+	await new Promise((resolve) => rebound.close(resolve))
 })

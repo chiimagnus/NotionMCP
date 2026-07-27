@@ -4,7 +4,7 @@
 // SECURITY NOTE: this is NOT a hard sandbox. `cwd` is only a *default*
 // working directory, not an enforced boundary. Absolute paths, `cd ..`, etc.
 // can still reach outside SANDBOX_DIR. The only real gate is the bearer
-// token checked by auth-proxy.mjs in front of this server.
+// token checked by the native HTTP trust boundary in front of this tool.
 
 import { spawn } from "node:child_process"
 import { existsSync } from "node:fs"
@@ -18,7 +18,7 @@ import { getAgentsMdBlock } from "../lib/agentsMd.mjs"
 
 // ponytail: 查一次 pwsh.exe 的位置：先查 PATH，再查 PowerShell 7 MSI 的固定安装目录。
 // 这个函数本身只做“查找”，不在模块加载时（import 阶段）调用——找不到 pwsh 时
-// 只应该让 run_command 这一次调用报错，不应该炸掉整个 exec-server 进程，否则
+// 只应该让 run_command 这一次调用报错，不应该影响整个 MCP server，否则
 // read_image / apply_patch / load_skills 这三个跟 pwsh 毫无关系的工具也会全部
 // 跟着不可用。
 function resolveWindowsShell() {

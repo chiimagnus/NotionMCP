@@ -82,6 +82,7 @@ function loadCatalog() {
 	}
 }
 
+// ponytail: catalog 是启动快照；新增或删除 skill 后重启服务，不为单用户目录增加 watcher。
 const catalog = loadCatalog()
 const catalogByKey = Object.fromEntries(catalog.map((s) => [s.key, s]))
 
@@ -108,7 +109,7 @@ export const definition = {
 	},
 }
 
-export async function call(args) {
+export async function call(args, context = {}) {
 	const key = args && args.name
 	if (!key || typeof key !== "string") {
 		return { content: [{ type: "text", text: "\u7f3a\u5c11\u5fc5\u586b\u53c2\u6570 name" }], isError: true }
@@ -124,6 +125,9 @@ export async function call(args) {
 	}
 	let content
 	try {
+		if (context.signal?.aborted) {
+			return { content: [{ type: "text", text: "读取已取消" }], isError: true }
+		}
 		content = readFileSync(join(skill.dir, "SKILL.md"), "utf-8")
 	} catch (err) {
 		auditLog("load_skills", "finished", { outcome: "read_failed", errorType: err?.name || "Error" })
