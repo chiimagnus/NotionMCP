@@ -114,7 +114,9 @@ function timeoutValue(timeoutMs) {
 }
 
 function logResult(result, startedAt, error) {
-	const level = result.cancelled ? "warning" : result.code === 0 ? "info" : "error"
+	// ponytail: error 只在 MCP 自己没能跑起命令时才有值（找不到 shell / 参数非法 / spawn 失败 / 子进程本身报错）；
+	// 被执行的命令退出码非 0，只是它自己的业务失败，不代表 NotionMCP 进程出了错，所以只算 warning。
+	const level = result.cancelled ? "warning" : result.code === 0 ? "info" : error ? "error" : "warning"
 	const message = result.cancelled
 		? "Command cancelled"
 		: result.timedOut

@@ -127,7 +127,7 @@ async function applyOperation(op) {
 export async function call(args, context = {}) {
 	const operations = (args && args.operations) || []
 	if (!Array.isArray(operations) || operations.length === 0) {
-		log("error", "apply_patch", "finished", { message: "'operations' must be a non-empty array" })
+		log("warning", "apply_patch", "finished", { message: "'operations' must be a non-empty array" })
 		return { content: [{ type: "text", text: "Error: 'operations' must be a non-empty array" }], isError: true }
 	}
 	const results = []
@@ -143,7 +143,9 @@ export async function call(args, context = {}) {
 		}
 		const result = await applyOperation(op)
 		results.push(result)
-		log(result.status === "failed" ? "error" : "info", "apply_patch", "operation", {
+		// ponytail: oldStr 没匹配上、文件已存在这类失败是调用方给的内容和文件真实状态对不上，
+		// 不是 NotionMCP 自己的进程故障，降级为 warning；真正的进程级故障走 http 层的 tool failed 事件。
+		log(result.status === "failed" ? "warning" : "info", "apply_patch", "operation", {
 			operation: result.type || "unknown",
 			outcome: result.status,
 			...(result.error ? { error: result.error } : {}),
