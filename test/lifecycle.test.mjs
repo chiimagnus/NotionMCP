@@ -1,9 +1,10 @@
 import assert from "node:assert/strict"
 import { spawn } from "node:child_process"
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+import { mkdtemp, open, readFile, rm, stat, writeFile } from "node:fs/promises"
 import http from "node:http"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { pathToFileURL } from "node:url"
 import test from "node:test"
 
 const ROOT = join(import.meta.dirname, "..")
@@ -90,6 +91,54 @@ test("Linux 和 Windows 直接从 .env 读取 Token，并拒绝示例占位符",
 		assert.throws(() => getLauncherConfig(platform), new RegExp(`请先替换 ${key}`))
 		delete process.env[key]
 	}
+})
+
+test("审计日志轮转有界、单行有效且忽略敏感字段", async (t) => {
+	const dir = await mkdtemp(join(tmpdir(), "notionmcp-log-"))
+	t.after(() => rm(dir, { recursive: true, force: true }))
+	const config = await configFile(dir, await freePort(), await freePort())
+	const logFile = join(dir, "mcp.log")
+	const backupFile = `${logFile}.1`
+	const handle = await open(logFile, "w")
+	await handle.write("active")
+	await handle.truncate(10 * 1024 * 1024)
+	await handle.close()
+	await writeFile(backupFile, "stale backup")
+
+	const auditModule = pathToFileURL(join(ROOT, "lib", "audit-log.mjs")).href
+	const secret = "SECRET_TOKEN_AUTH_COMMAND_ARGS"
+	const source = `
+		const { auditLog } = await import(${JSON.stringify(auditModule)})
+		auditLog("test", "rotate", {
+			outcome: "ok",
+			token: ${JSON.stringify(secret)},
+			authorization: ${JSON.stringify(secret)},
+			command: ${JSON.stringify(secret)},
+			args: ${JSON.stringify(secret)}
+		})
+		auditLog("test", "truncate", { errorType: ${JSON.stringify("中文\n".repeat(5_000))} })
+	`
+	const child = spawn(process.execPath, ["--input-type=module", "-e", source], {
+		stdio: ["ignore", "ignore", "pipe"],
+		env: { ...process.env, MCP_CONFIG_FILE: config, MCP_LOG_FILE: logFile },
+	})
+	assert.equal(await waitForExit(child), 0)
+
+	const text = await readFile(logFile, "utf8")
+	const lines = text.trimEnd().split("\n")
+	assert.equal(lines.length, 2)
+	assert.doesNotMatch(text, /\uFFFD/)
+	assert.doesNotMatch(text, new RegExp(secret))
+	for (const line of lines) assert.ok(Buffer.byteLength(`${line}\n`) <= 8 * 1024)
+	assert.equal((await stat(backupFile)).size, 10 * 1024 * 1024)
+	assert.ok((await stat(logFile)).size <= 10 * 1024 * 1024)
+})
+
+test("旧日志 writer 已从运行路径删除", async () => {
+	const launcher = await readFile(join(ROOT, "lib", "up.mjs"), "utf8")
+	const rpc = await readFile(join(ROOT, "lib", "rpc.mjs"), "utf8")
+	assert.doesNotMatch(launcher, /UP_LOG_FILE|appendFile\(/)
+	assert.doesNotMatch(rpc, /appendFileSync|export function log/)
 })
 
 test("网关使用无状态 HTTP，不保留会过期的 Session", async () => {
