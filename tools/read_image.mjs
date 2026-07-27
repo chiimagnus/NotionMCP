@@ -103,15 +103,28 @@ function stderrCollector() {
 			discarded += buffer.length - kept
 		},
 		value() {
-			let buffer = Buffer.concat(chunks, bytes)
-			let suffix = ""
-			if (discarded) {
-				suffix = `\n...[truncated, ${discarded} more bytes]`
-				buffer = buffer.subarray(0, MAX_RASTERIZER_STDERR_BYTES - Buffer.byteLength(suffix))
-			}
-			return new TextDecoder().decode(buffer) + suffix
+			const decoded = new TextDecoder().decode(Buffer.concat(chunks, bytes))
+			const expanded = Buffer.byteLength(decoded) > MAX_RASTERIZER_STDERR_BYTES
+			const suffix = discarded
+				? `\n...[truncated, ${discarded} more bytes]`
+				: expanded
+					? "\n...[truncated]"
+					: ""
+			return truncateUtf8(decoded, MAX_RASTERIZER_STDERR_BYTES - Buffer.byteLength(suffix)) + suffix
 		},
 	}
+}
+
+function truncateUtf8(text, maxBytes) {
+	const encoded = Buffer.from(text)
+	if (encoded.length <= maxBytes) return text
+	const decoder = new TextDecoder("utf-8", { fatal: true })
+	for (let end = maxBytes; end > 0; end -= 1) {
+		try {
+			return decoder.decode(encoded.subarray(0, end))
+		} catch {}
+	}
+	return ""
 }
 
 export function runRasterizer(command, args, { signal, timeoutMs = RASTERIZER_TIMEOUT_MS } = {}) {
