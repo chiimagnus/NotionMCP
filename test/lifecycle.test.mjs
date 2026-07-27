@@ -1,7 +1,9 @@
 import assert from "node:assert/strict"
-import { spawn } from "node:child_process"
-import { mkdir, mkdtemp, open, readFile, readdir, rm, stat, writeFile } from "node:fs/promises"
+import { execFileSync, spawn } from "node:child_process"
+import { watch } from "node:fs"
+import { chmod, mkdir, mkdtemp, open, readFile, readdir, rm, stat, writeFile } from "node:fs/promises"
 import http from "node:http"
+import { createConnection } from "node:net"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { pathToFileURL } from "node:url"
@@ -467,6 +469,9 @@ async function getHttpFixture() {
 	if (httpFixture) return httpFixture
 	const dir = await mkdtemp(join(tmpdir(), "notionmcp-http-"))
 	const config = await configFile(dir)
+	const skillDir = join(dir, "fixture-skill")
+	await mkdir(skillDir)
+	await writeFile(join(skillDir, "SKILL.md"), "---\nname: fixture-skill\ndescription: test skill\n---\n")
 	const previous = {
 		config: process.env.MCP_CONFIG_FILE,
 		log: process.env.MCP_LOG_FILE,
@@ -565,6 +570,79 @@ async function assertHttpHealthy(lifecycle, port, token) {
 	assert.equal(JSON.parse(response.body).result.tools.length, 4)
 	assert.equal(response.headers["mcp-session-id"], undefined)
 	assert.equal(lifecycle.activeRequestCount, 0)
+}
+
+function toolCall(name, args, id = 1) {
+	return { jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: args } }
+}
+
+function openMcpRequest(port, token, message) {
+	let responseStarted = false
+	let req
+	const response = new Promise((resolve, reject) => {
+		req = http.request(
+			{
+				host: "127.0.0.1",
+				port,
+				path: "/mcp",
+				method: "POST",
+				headers: {
+					Authorization: `Bearer ${token}`,
+					Accept: "application/json, text/event-stream",
+					"Content-Type": "application/json",
+					"Mcp-Protocol-Version": "2025-03-26",
+				},
+			},
+			(res) => {
+				responseStarted = true
+				const chunks = []
+				res.on("data", (chunk) => chunks.push(chunk))
+				res.once("end", () =>
+					resolve({
+						status: res.statusCode,
+						body: Buffer.concat(chunks).toString("utf8"),
+					}),
+				)
+			},
+		)
+		req.once("error", (error) => {
+			if (!responseStarted) reject(error)
+		})
+		req.end(JSON.stringify(message))
+	})
+	return { req, response }
+}
+
+async function waitForCondition(predicate, message, timeoutMs = 5_000) {
+	const deadline = Date.now() + timeoutMs
+	while (Date.now() < deadline) {
+		if (await predicate()) return
+		await new Promise((resolve) => setTimeout(resolve, 10))
+	}
+	throw new Error(message)
+}
+
+function repositoryNodeProcessCount() {
+	if (process.platform === "win32") {
+		const escapedRoot = ROOT.replaceAll("'", "''")
+		const output = execFileSync(
+			"pwsh.exe",
+			[
+				"-NoLogo",
+				"-NoProfile",
+				"-NonInteractive",
+				"-Command",
+				`@(Get-CimInstance Win32_Process | Where-Object { $_.ProcessId -ne ${process.pid} -and $_.Name -eq 'node.exe' -and $_.CommandLine -like '*${escapedRoot}*' }).Count`,
+			],
+			{ encoding: "utf8" },
+		)
+		return Number(output.trim())
+	}
+	const output = execFileSync("ps", ["-axo", "pid=,command="], { encoding: "utf8" })
+	return output
+		.split("\n")
+		.filter((line) => line.includes(ROOT) && /\bnode\b/.test(line) && Number(line.trim().split(/\s+/, 1)[0]) !== process.pid)
+		.length
 }
 
 test("原生无状态 HTTP 完成基础 MCP 协议且可确定关闭", async (t) => {
@@ -747,4 +825,217 @@ test("JSON-RPC 和协议版本错误互不污染后续请求", async (t) => {
 	}
 	assert.equal(lifecycle.httpServer.listenerCount("request"), requestListeners)
 	await assertHttpHealthy(lifecycle, port, token)
+})
+
+test("四个长请求占满 slot，第五个和 batch 都不能启动命令", async (t) => {
+	const { lifecycle, port, token } = await startMcpServer(t)
+	const helper = join(httpFixture.dir, "http-tree.cjs")
+	await writeFile(
+		helper,
+		`const{spawn}=require("node:child_process");const{writeFileSync}=require("node:fs");if(process.argv[2]==="grand"){writeFileSync(process.argv[3],String(process.pid));setInterval(()=>{},1000)}else{writeFileSync(process.argv[2],String(process.pid));spawn(process.execPath,[__filename,"grand",process.argv[3]],{stdio:"ignore"});setInterval(()=>{},1000)}\n`,
+	)
+	const requests = []
+	const pids = []
+	for (let i = 0; i < 4; i += 1) {
+		const parentFile = join(httpFixture.dir, `http-parent-${i}.pid`)
+		const grandFile = join(httpFixture.dir, `http-grand-${i}.pid`)
+		const pending = openMcpRequest(port, token, toolCall("run_command", {
+			command: nodeCommand(helper, parentFile, grandFile),
+			timeoutMs: 30_000,
+		}, i + 1))
+		requests.push({ ...pending, settled: pending.response.catch(() => null) })
+		pids.push(await waitForPid(parentFile), await waitForPid(grandFile))
+	}
+	assert.equal(lifecycle.activeRequestCount, 4)
+
+	const marker = join(httpFixture.dir, "fifth-marker")
+	const markerCommand = nodeCommand(join(httpFixture.dir, "write-marker.cjs"), marker)
+	await writeFile(join(httpFixture.dir, "write-marker.cjs"), `require("node:fs").writeFileSync(process.argv[2],"ran")\n`)
+	const fifthBody = JSON.stringify(toolCall("run_command", { command: markerCommand }, 10))
+	const fifth = await headersOnlyRequest(port, {
+		Authorization: `Bearer ${token}`,
+		Accept: "application/json, text/event-stream",
+		"Content-Type": "application/json",
+		"Content-Length": String(Buffer.byteLength(fifthBody)),
+	})
+	assert.equal(fifth.status, 429)
+	await assert.rejects(readFile(marker))
+
+	for (const request of requests) request.req.destroy()
+	await Promise.all(requests.map((request) => request.settled))
+	await assertDead(...pids)
+	await waitForCondition(() => lifecycle.activeRequestCount === 0, "取消后 slot 未释放")
+
+	const batch = await mcpRequest(port, token, [
+		toolCall("run_command", { command: markerCommand }, 11),
+		toolCall("run_command", { command: markerCommand }, 12),
+	])
+	assert.equal(batch.status, 400)
+	await assert.rejects(readFile(marker))
+	const recovered = await Promise.all(Array.from({ length: 4 }, () => mcpRequest(port, token, TOOLS_LIST)))
+	assert.ok(recovered.every((response) => response.status === 200))
+	assert.equal(lifecycle.activeRequestCount, 0)
+})
+
+test("四个工具均经真实 HTTP 到达，apply_patch 在取消边界停止后续写入", async (t) => {
+	const { lifecycle, port, token } = await startMcpServer(t)
+	const commandHelper = join(httpFixture.dir, "http-output.cjs")
+	await writeFile(commandHelper, `process.stdout.write("via-http")\n`)
+	const image = join(httpFixture.dir, "http-image.png")
+	await writeFile(image, Buffer.from([1, 2, 3]))
+	const patched = join(httpFixture.dir, "http-patched.txt")
+	const calls = [
+		toolCall("run_command", { command: nodeCommand(commandHelper) }, 20),
+		toolCall("read_image", { path: image }, 21),
+		toolCall("apply_patch", {
+			operations: [{ type: "create_file", path: patched, content: "created", overwrite: true }],
+		}, 22),
+		toolCall("load_skills", { name: "fixture-skill" }, 23),
+	]
+	const responses = []
+	for (const call of calls) responses.push(await mcpRequest(port, token, call))
+	assert.ok(responses.every((response) => response.status === 200))
+	assert.match(JSON.parse(responses[0].body).result.content[0].text, /via-http/)
+	assert.equal(JSON.parse(responses[1].body).result.content[0].data, Buffer.from([1, 2, 3]).toString("base64"))
+	assert.equal(await readFile(patched, "utf8"), "created")
+	assert.match(JSON.parse(responses[3].body).result.content[0].text, /fixture-skill/)
+
+	const operationDir = join(httpFixture.dir, "cancelled-patch")
+	await mkdir(operationDir, { recursive: true })
+	const operations = Array.from({ length: 200 }, (_, index) => ({
+		type: "create_file",
+		path: join(operationDir, `${String(index).padStart(3, "0")}.txt`),
+		content: "x",
+		overwrite: true,
+	}))
+	let pending
+	let sawWriteResolve
+	const sawWrite = new Promise((resolve) => {
+		sawWriteResolve = resolve
+	})
+	const watcher = watch(operationDir, () => {
+		pending?.req.destroy()
+		sawWriteResolve()
+	})
+	t.after(() => watcher.close())
+	pending = openMcpRequest(port, token, toolCall("apply_patch", { operations }, 24))
+	const settled = pending.response.catch(() => null)
+	await sawWrite
+	await settled
+	await waitForCondition(() => lifecycle.activeRequestCount === 0, "apply_patch 取消后 slot 未释放")
+	await waitForCondition(
+		async () => (await readFile(join(operationDir, "000.txt"), "utf8").catch(() => "")) === "x",
+		"已开始的 operation 未完成",
+	)
+	assert.equal(await readFile(join(operationDir, "199.txt"), "utf8").catch(() => null), null)
+})
+
+test("HTTP socket 断开会取消 rasterizer 并删除临时目录", async (t) => {
+	if (process.platform === "win32") return
+	const { lifecycle, port, token } = await startMcpServer(t)
+	const bin = join(httpFixture.dir, "fake-raster-bin")
+	await mkdir(bin, { recursive: true })
+	const helper = join(bin, "fake-rasterizer")
+	await writeFile(
+		helper,
+		`#!/usr/bin/env node\nconst{spawn}=require("node:child_process");const{writeFileSync}=require("node:fs");writeFileSync(process.env.MCP_TEST_RASTER_PARENT_PID,String(process.pid));spawn(process.execPath,["-e",'require("node:fs").writeFileSync(process.env.MCP_TEST_RASTER_GRAND_PID,String(process.pid));setInterval(()=>{},1000)'],{stdio:"ignore",env:process.env});setInterval(()=>{},1000)\n`,
+	)
+	await chmod(helper, 0o755)
+	for (const name of process.platform === "darwin" ? ["qlmanage"] : ["magick", "convert", "rsvg-convert"]) {
+		await writeFile(join(bin, name), await readFile(helper))
+		await chmod(join(bin, name), 0o755)
+	}
+	const parentFile = join(httpFixture.dir, "raster-http-parent.pid")
+	const grandFile = join(httpFixture.dir, "raster-http-grand.pid")
+	const svg = join(httpFixture.dir, "raster-http.svg")
+	await writeFile(svg, `<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"/>`)
+	const oldPath = process.env.PATH
+	process.env.PATH = `${bin}:${oldPath}`
+	process.env.MCP_TEST_RASTER_PARENT_PID = parentFile
+	process.env.MCP_TEST_RASTER_GRAND_PID = grandFile
+	const before = new Set((await readdir(tmpdir())).filter((name) => name.startsWith("svg-thumb-")))
+	try {
+		const pending = openMcpRequest(port, token, toolCall("read_image", { path: svg }, 30))
+		const settled = pending.response.catch(() => null)
+		const parentPid = await waitForPid(parentFile)
+		const grandPid = await waitForPid(grandFile)
+		pending.req.destroy()
+		await settled
+		await assertDead(parentPid, grandPid)
+		await waitForCondition(() => lifecycle.activeRequestCount === 0, "rasterizer 取消后 slot 未释放")
+		const leaked = (await readdir(tmpdir())).filter((name) => name.startsWith("svg-thumb-") && !before.has(name))
+		assert.deepEqual(leaked, [])
+	} finally {
+		process.env.PATH = oldPath
+		delete process.env.MCP_TEST_RASTER_PARENT_PID
+		delete process.env.MCP_TEST_RASTER_GRAND_PID
+	}
+	await assertHttpHealthy(lifecycle, port, token)
+})
+
+test("shutdown 取消活跃工具，并等待已 accept 的请求返回 503", async (t) => {
+	const activeServer = await startMcpServer(t)
+	const helper = join(httpFixture.dir, "shutdown-tree.cjs")
+	const parentFile = join(httpFixture.dir, "shutdown-parent.pid")
+	const grandFile = join(httpFixture.dir, "shutdown-grand.pid")
+	await writeFile(
+		helper,
+		`const{spawn}=require("node:child_process");const{writeFileSync}=require("node:fs");if(process.argv[2]==="grand"){writeFileSync(process.argv[3],String(process.pid));setInterval(()=>{},1000)}else{writeFileSync(process.argv[2],String(process.pid));spawn(process.execPath,[__filename,"grand",process.argv[3]],{stdio:"ignore"});setInterval(()=>{},1000)}\n`,
+	)
+	const pending = openMcpRequest(
+		activeServer.port,
+		activeServer.token,
+		toolCall("run_command", { command: nodeCommand(helper, parentFile, grandFile), timeoutMs: 30_000 }, 40),
+	)
+	const settled = pending.response.catch(() => null)
+	const parentPid = await waitForPid(parentFile)
+	const grandPid = await waitForPid(grandFile)
+	await activeServer.lifecycle.shutdown()
+	await settled
+	await assertDead(parentPid, grandPid)
+	assert.equal(activeServer.lifecycle.activeRequestCount, 0)
+	const rebound = http.createServer()
+	await new Promise((resolve) => rebound.listen(activeServer.port, "127.0.0.1", resolve))
+	await new Promise((resolve) => rebound.close(resolve))
+
+	const acceptedServer = await startMcpServer(t)
+	const marker = join(httpFixture.dir, "shutdown-marker")
+	const markerHelper = join(httpFixture.dir, "write-shutdown-marker.mjs")
+	await writeFile(markerHelper, `import{writeFileSync}from"node:fs";writeFileSync(process.argv[2],"started")\n`)
+	const markerBody = JSON.stringify(
+		toolCall("run_command", { command: nodeCommand(markerHelper, marker) }, 41),
+	)
+	const socket = createConnection({ host: "127.0.0.1", port: acceptedServer.port })
+	await new Promise((resolve, reject) => {
+		socket.once("connect", resolve)
+		socket.once("error", reject)
+	})
+	socket.write("POST /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\n")
+	const response = new Promise((resolve) => {
+		let text = ""
+		socket.on("data", (chunk) => (text += chunk))
+		socket.on("close", () => resolve(text))
+	})
+	const shutdown = acceptedServer.lifecycle.shutdown()
+	socket.end(
+		`Authorization: Bearer ${acceptedServer.token}\r\nAccept: application/json, text/event-stream\r\nContent-Type: application/json\r\nContent-Length: ${Buffer.byteLength(markerBody)}\r\n\r\n${markerBody}`,
+	)
+	assert.match(await response, /503 Service Unavailable/)
+	await shutdown
+	await assert.rejects(readFile(marker))
+})
+
+test("500 个无状态请求不累积进程、Session 或 active context", async (t) => {
+	const { lifecycle, port, token } = await startMcpServer(t)
+	const baselineProcesses = repositoryNodeProcessCount()
+	for (let i = 0; i < 500; i += 1) {
+		const response = await mcpRequest(port, token, { ...TOOLS_LIST, id: 1_000 + i })
+		assert.equal(response.status, 200)
+		assert.equal(response.headers["mcp-session-id"], undefined)
+	}
+	assert.equal(lifecycle.activeRequestCount, 0)
+	assert.equal(repositoryNodeProcessCount(), baselineProcesses)
+	const concurrent = await Promise.all(Array.from({ length: 4 }, () => mcpRequest(port, token, TOOLS_LIST)))
+	assert.ok(concurrent.every((response) => response.status === 200))
+	assert.equal(lifecycle.activeRequestCount, 0)
 })
