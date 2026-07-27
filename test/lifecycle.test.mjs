@@ -132,6 +132,20 @@ test("审计日志轮转有界、单行有效且忽略敏感字段", async (t) =
 	for (const line of lines) assert.ok(Buffer.byteLength(`${line}\n`) <= 8 * 1024)
 	assert.equal((await stat(backupFile)).size, 10 * 1024 * 1024)
 	assert.ok((await stat(logFile)).size <= 10 * 1024 * 1024)
+
+	const oversizedBackup = await open(backupFile, "w")
+	await oversizedBackup.truncate(10 * 1024 * 1024 + 1)
+	await oversizedBackup.close()
+	const prune = spawn(
+		process.execPath,
+		["--input-type=module", "-e", `const{auditLog}=await import(${JSON.stringify(auditModule)});auditLog("test","prune")`],
+		{
+			stdio: ["ignore", "ignore", "pipe"],
+			env: { ...process.env, MCP_CONFIG_FILE: config, MCP_LOG_FILE: logFile },
+		},
+	)
+	assert.equal(await waitForExit(prune), 0)
+	await assert.rejects(stat(backupFile), { code: "ENOENT" })
 })
 
 test("旧日志 writer 已从运行路径删除", async () => {
@@ -331,7 +345,7 @@ test("rasterizer 的 stderr、timeout 与 Abort 均有界且清理进程树", as
 	const helper = join(dir, "rasterizer.cjs")
 	await writeFile(
 		helper,
-		`const{spawn}=require("node:child_process");const{writeFileSync}=require("node:fs");const mode=process.argv[2];if(mode==="stderr"){process.stderr.write("中".repeat(5000));process.exit(1)}else if(mode==="grand"){writeFileSync(process.argv[3],String(process.pid));setInterval(()=>{},1000)}else{writeFileSync(process.argv[3],String(process.pid));spawn(process.execPath,[__filename,"grand",process.argv[4]],{stdio:"ignore"});setInterval(()=>{},1000)}\n`,
+		`const{spawn}=require("node:child_process");const{writeFileSync}=require("node:fs");const mode=process.argv[2];if(mode==="stderr"){process.stderr.write(Buffer.alloc(9000,255));process.exit(1)}else if(mode==="grand"){writeFileSync(process.argv[3],String(process.pid));setInterval(()=>{},1000)}else{writeFileSync(process.argv[3],String(process.pid));spawn(process.execPath,[__filename,"grand",process.argv[4]],{stdio:"ignore"});setInterval(()=>{},1000)}\n`,
 	)
 
 	const bounded = await runRasterizerTool(config, process.execPath, [helper, "stderr"], { timeoutMs: 5_000 })
