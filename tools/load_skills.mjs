@@ -111,7 +111,7 @@ export const definition = {
 export async function call(args, context = {}) {
 	const key = args && args.name
 	if (!key || typeof key !== "string") {
-		log("error", "load_skills", "finished", { outcome: "invalid_input", message: "Missing required name" })
+		log("warning", "load_skills", "finished", { outcome: "invalid_input", message: "Missing required name" })
 		return { content: [{ type: "text", text: "\u7f3a\u5c11\u5fc5\u586b\u53c2\u6570 name" }], isError: true }
 	}
 	const skill = catalogByKey[key]
@@ -131,7 +131,7 @@ export async function call(args, context = {}) {
 		}
 		content = readFileSync(join(skill.dir, "SKILL.md"), "utf-8")
 	} catch (err) {
-		log("error", "load_skills", "finished", { outcome: "read_failed", error: err })
+		log("warning", "load_skills", "finished", { outcome: "read_failed", error: err })
 		return { content: [{ type: "text", text: `\u8bfb\u53d6\u5931\u8d25\uff1a${err}` }], isError: true }
 	}
 	log("info", "load_skills", "finished", { outcome: "ok" })

@@ -252,7 +252,16 @@ async function readImage({ path, maxSize }, signal) {
 }
 
 export async function call(args, context = {}) {
-	const { data, mimeType } = await readImage(args || {}, context.signal)
-	log("info", "read_image", "finished", { outcome: "ok", mimeType })
-	return { content: [{ type: "image", data, mimeType }] }
+	let result
+	try {
+		result = await readImage(args || {}, context.signal)
+	} catch (err) {
+		if (err.name === "AbortError") throw err
+		// ponytail: 参数缺失、后缀不支持、文件读不到——都是调用方给的输入和实际状态对不上，
+		// 不是 NotionMCP 自己的进程故障，本地接住记 warning，不走顶层兼底的 error。
+		log("warning", "read_image", "finished", { outcome: "failed", error: err })
+		return { content: [{ type: "text", text: `Error: ${err.message || err}` }], isError: true }
+	}
+	log("info", "read_image", "finished", { outcome: "ok", mimeType: result.mimeType })
+	return { content: [{ type: "image", data: result.data, mimeType: result.mimeType }] }
 }
