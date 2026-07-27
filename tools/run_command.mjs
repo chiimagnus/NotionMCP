@@ -4,20 +4,21 @@
 // SECURITY NOTE: this is NOT a hard sandbox. `cwd` is only a *default*
 // working directory, not an enforced boundary. Absolute paths, `cd ..`, etc.
 // can still reach outside SANDBOX_DIR. The only real gate is the bearer
-// token checked by auth-proxy.mjs in front of this server.
+// token checked by the native HTTP trust boundary in front of this tool.
 
-import { spawn, spawnSync } from "node:child_process"
+import { spawn } from "node:child_process"
 import { existsSync } from "node:fs"
 import { delimiter, join } from "node:path"
 import { StringDecoder } from "node:string_decoder"
-import { SANDBOX_DIR, DEFAULT_TIMEOUT_MS, MAX_TIMEOUT_MS } from "../lib/config.mjs"
-import { log, truncate } from "../lib/rpc.mjs"
+import { SANDBOX_DIR, DEFAULT_TIMEOUT_MS, MAX_OUTPUT_CHARS, MAX_TIMEOUT_MS } from "../lib/config.mjs"
+import { log } from "../lib/log.mjs"
+import { registerChild, terminateProcessTree, unregisterChild } from "../lib/process-tree.mjs"
 import { resolvePath } from "../lib/paths.mjs"
 import { getAgentsMdBlock } from "../lib/agentsMd.mjs"
 
 // ponytail: 查一次 pwsh.exe 的位置：先查 PATH，再查 PowerShell 7 MSI 的固定安装目录。
 // 这个函数本身只做“查找”，不在模块加载时（import 阶段）调用——找不到 pwsh 时
-// 只应该让 run_command 这一次调用报错，不应该炸掉整个 exec-server 进程，否则
+// 只应该让 run_command 这一次调用报错，不应该影响整个 MCP server，否则
 // read_image / apply_patch / load_skills 这三个跟 pwsh 毫无关系的工具也会全部
 // 跟着不可用。
 function resolveWindowsShell() {
@@ -79,50 +80,89 @@ export const definition = {
 
 // 进程退出后给 stdio 排空剩余数据的宽限。
 const STDIO_FLUSH_GRACE_MS = 2_000
-const activeChildren = new Set()
 
-// ponytail: 只杀 shell 会留下继承 stdio 的子孙；Windows 用 taskkill /T，
-// Unix 把每条命令放进独立进程组后按组杀。吞吐量需要并发隔离时再换专用作业管理。
-function killTree(child) {
-	if (!child || !child.pid) return
-	if (process.platform === "win32") {
-		try {
-			const result = spawnSync("taskkill.exe", ["/PID", String(child.pid), "/T", "/F"], {
-				stdio: "ignore",
-				timeout: 10_000,
-			})
-			if (!result.error && result.status === 0) return
-		} catch {}
-	} else {
-		try {
-			process.kill(-child.pid, "SIGKILL")
-			return
-		} catch {}
+function outputCollector() {
+	let text = ""
+	let discarded = 0
+	return {
+		append(chunk) {
+			const remaining = MAX_OUTPUT_CHARS - text.length
+			let kept = Math.max(Math.min(remaining, chunk.length), 0)
+			if (
+				kept > 0 &&
+				kept < chunk.length &&
+				/[\uD800-\uDBFF]/.test(chunk[kept - 1]) &&
+				/[\uDC00-\uDFFF]/.test(chunk[kept])
+			) {
+				kept -= 1
+			}
+			if (kept > 0) text += chunk.slice(0, kept)
+			discarded += chunk.length - kept
+		},
+		value() {
+			return discarded ? `${text}\n...[truncated, ${discarded} more chars]` : text
+		},
 	}
-	try {
-		child.kill("SIGKILL")
-	} catch {}
 }
 
-process.once("exit", () => {
-	for (const child of activeChildren) killTree(child)
-})
+function timeoutValue(timeoutMs) {
+	if (timeoutMs === undefined) return DEFAULT_TIMEOUT_MS
+	if (!Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > MAX_TIMEOUT_MS) {
+		throw new Error(`timeoutMs must be an integer from 1 to ${MAX_TIMEOUT_MS}`)
+	}
+	return timeoutMs
+}
 
-function runCommand({ command, cwd, timeoutMs }) {
+function logResult(result, startedAt, error) {
+	const level = result.cancelled ? "warning" : result.code === 0 ? "info" : "error"
+	const message = result.cancelled
+		? "Command cancelled"
+		: result.timedOut
+			? "Command timed out"
+			: result.code === 0
+				? undefined
+				: `Command exited with code ${result.code}`
+	log(level, "run_command", "finished", {
+		code: result.code,
+		elapsedMs: Date.now() - startedAt,
+		timedOut: result.timedOut,
+		cancelled: result.cancelled,
+		...(message ? { message } : {}),
+		...(result.code !== 0 && result.stderr ? { stderr: result.stderr } : {}),
+		...(error ? { error } : {}),
+	})
+}
+
+function runCommand({ command, cwd, timeoutMs }, { signal } = {}) {
 	return new Promise((resolve) => {
+		const startedAt = Date.now()
+		const finishEarly = (result, error) => {
+			logResult(result, startedAt, error)
+			resolve(result)
+		}
 		if (!command || typeof command !== "string") {
-			resolve({ code: -1, stdout: "", stderr: "Missing required 'command' string", timedOut: false })
+			finishEarly({ code: -1, stdout: "", stderr: "Missing required 'command' string", timedOut: false, cancelled: false })
+			return
+		}
+		if (signal?.aborted) {
+			finishEarly({ code: -1, stdout: "", stderr: "Command cancelled", timedOut: false, cancelled: true })
 			return
 		}
 		let shell
 		try {
 			shell = getShell()
 		} catch (err) {
-			resolve({ code: -1, stdout: "", stderr: String(err.message || err), timedOut: false })
+			finishEarly({ code: -1, stdout: "", stderr: String(err.message || err), timedOut: false, cancelled: false }, err)
 			return
 		}
 		const workDir = cwd ? resolvePath(cwd) : SANDBOX_DIR
-		const timeout = Math.min(Number(timeoutMs) || DEFAULT_TIMEOUT_MS, MAX_TIMEOUT_MS)
+		let timeout
+		try {
+			timeout = timeoutValue(timeoutMs)
+		} catch (err) {
+			finishEarly({ code: -1, stdout: "", stderr: err.message, timedOut: false, cancelled: false }, err)
+			return
+		}
 		let child
 		try {
 			const winCommand =
@@ -137,68 +177,114 @@ function runCommand({ command, cwd, timeoutMs }) {
 				detached: process.platform !== "win32",
 				env: { ...process.env, PYTHONUTF8: "1", PYTHONIOENCODING: "utf-8" },
 			})
-			activeChildren.add(child)
+			registerChild(child)
 		} catch (err) {
-			resolve({ code: -1, stdout: "", stderr: String(err), timedOut: false })
+			finishEarly({ code: -1, stdout: "", stderr: String(err), timedOut: false, cancelled: false }, err)
 			return
 		}
-		let stdout = ""
-		let stderr = ""
+		const stdout = outputCollector()
+		const stderr = outputCollector()
 		let timedOut = false
+		let cancelled = false
 		let settled = false
 		let flushTimer = null
+		let stopPromise = null
 		// 用 StringDecoder 做增量解码，避免多字节 UTF-8 字符（比如中文）
 		// 刚好被拆分在两个 data 分片之间时产生乱码。
 		const stdoutDecoder = new StringDecoder("utf8")
 		const stderrDecoder = new StringDecoder("utf8")
-		const finish = (code) => {
+		const onStdout = (data) => stdout.append(stdoutDecoder.write(data))
+		const onStderr = (data) => stderr.append(stderrDecoder.write(data))
+		const removeListeners = () => {
+			child.stdout?.off("data", onStdout)
+			child.stderr?.off("data", onStderr)
+			child.off("exit", onExit)
+			child.off("close", onClose)
+			child.off("error", onError)
+			signal?.removeEventListener?.("abort", onAbort)
+		}
+		const finish = (code, error) => {
 			if (settled) return
 			settled = true
 			clearTimeout(timer)
 			clearTimeout(flushTimer)
-			activeChildren.delete(child)
-			stdout += stdoutDecoder.end()
-			stderr += stderrDecoder.end()
-			log(`cmd=${JSON.stringify(command)} cwd=${JSON.stringify(workDir)} exit=${code} timedOut=${timedOut}`)
-			resolve({ code, stdout: truncate(stdout), stderr: truncate(stderr), timedOut })
+			removeListeners()
+			unregisterChild(child)
+			stdout.append(stdoutDecoder.end())
+			stderr.append(stderrDecoder.end())
+			if (error) stderr.append(String(error.message || error))
+			const exitCode = code ?? -1
+			const result = {
+				code: exitCode,
+				stdout: stdout.value(),
+				stderr: stderr.value(),
+				timedOut,
+				cancelled,
+			}
+			logResult(result, startedAt, error)
+			resolve(result)
 		}
-		const timer = setTimeout(() => {
-			timedOut = true
-			killTree(child)
-		}, timeout)
-		child.stdout.on("data", (d) => (stdout += stdoutDecoder.write(d)))
-		child.stderr.on("data", (d) => (stderr += stderrDecoder.write(d)))
+		const stop = (reason) => {
+			if (settled || stopPromise) return stopPromise
+			timedOut = reason === "timeout"
+			cancelled = reason === "cancelled"
+			stopPromise = terminateProcessTree(child).finally(() => {
+				child.stdout?.destroy()
+				child.stderr?.destroy()
+				finish(child.exitCode)
+			})
+			return stopPromise
+		}
+		const onAbort = () => {
+			void stop("cancelled")
+		}
+		const onExit = (code) => {
+			if (settled || stopPromise) return
+			clearTimeout(flushTimer)
+			flushTimer = setTimeout(() => {
+				stopPromise = terminateProcessTree(child).finally(() => {
+					child.stdout?.destroy()
+					child.stderr?.destroy()
+					finish(code)
+				})
+			}, STDIO_FLUSH_GRACE_MS)
+		}
+		const onClose = (code) => {
+			if (!stopPromise) finish(code)
+		}
+		const onError = (err) => {
+			if (settled || stopPromise) return
+			stopPromise = terminateProcessTree(child).finally(() => {
+				child.stdout?.destroy()
+				child.stderr?.destroy()
+				finish(-1, err)
+			})
+		}
+		const timer = setTimeout(() => void stop("timeout"), timeout)
+		child.stdout?.on("data", onStdout)
+		child.stderr?.on("data", onStderr)
+		child.on("exit", onExit)
+		child.on("close", onClose)
+		child.on("error", onError)
+		signal?.addEventListener?.("abort", onAbort, { once: true })
+		if (signal?.aborted) onAbort()
 		// "close" 要等进程结束【且】所有 stdio 管道 EOF。命令里如果用 Start-Process /
 		// nohup 之类拉起了后台孙子进程，它会继承 stdout 写端句柄，管道永远不会 EOF，
 		// "close" 也就永远不会来 —— 这次调用会一直挂着，直到上游超时取消请求。
 		// 所以以 "exit"（进程确实结束了）为准，再给 stdio 一点时间排空剩余数据。
-		child.on("exit", (code) => {
-			if (settled) return
-			clearTimeout(flushTimer)
-			flushTimer = setTimeout(() => {
-				child.stdout?.destroy()
-				child.stderr?.destroy()
-				finish(code)
-			}, STDIO_FLUSH_GRACE_MS)
-			flushTimer.unref?.()
-		})
-		child.on("close", (code) => finish(code))
-		child.on("error", (err) => {
-			if (settled) return
-			settled = true
-			clearTimeout(timer)
-			clearTimeout(flushTimer)
-			activeChildren.delete(child)
-			resolve({ code: -1, stdout, stderr: String(err), timedOut: false })
-		})
 	})
 }
 
-export async function call(args) {
+export async function call(args, context = {}) {
 	const cwdArg = args && args.cwd
 	const workDir = cwdArg ? resolvePath(cwdArg) : SANDBOX_DIR
-	const result = await runCommand(args || {})
+	const result = await runCommand(args || {}, context)
 	const agentsMdBlock = getAgentsMdBlock(workDir)
-	const text = `exit code: ${result.code}${result.timedOut ? " (timed out, process killed)" : ""}\n\n--- stdout ---\n${result.stdout}\n\n--- stderr ---\n${result.stderr}${agentsMdBlock}`
+	const status = result.timedOut
+		? " (timed out, process killed)"
+		: result.cancelled
+			? " (cancelled, process killed)"
+			: ""
+	const text = `exit code: ${result.code}${status}\n\n--- stdout ---\n${result.stdout}\n\n--- stderr ---\n${result.stderr}${agentsMdBlock}`
 	return { content: [{ type: "text", text }] }
 }
