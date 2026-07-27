@@ -11,7 +11,7 @@ import { existsSync } from "node:fs"
 import { delimiter, join } from "node:path"
 import { StringDecoder } from "node:string_decoder"
 import { SANDBOX_DIR, DEFAULT_TIMEOUT_MS, MAX_OUTPUT_CHARS, MAX_TIMEOUT_MS } from "../lib/config.mjs"
-import { auditLog } from "../lib/audit-log.mjs"
+import { log } from "../lib/log.mjs"
 import { registerChild, terminateProcessTree, unregisterChild } from "../lib/process-tree.mjs"
 import { resolvePath } from "../lib/paths.mjs"
 import { getAgentsMdBlock } from "../lib/agentsMd.mjs"
@@ -120,7 +120,7 @@ function runCommand({ command, cwd, timeoutMs }, { signal } = {}) {
 			return
 		}
 		if (signal?.aborted) {
-			auditLog("run_command", "finished", { code: -1, timedOut: false, cancelled: true })
+			log("warning", "run_command", "finished", { code: -1, timedOut: false, cancelled: true })
 			resolve({ code: -1, stdout: "", stderr: "Command cancelled", timedOut: false, cancelled: true })
 			return
 		}
@@ -191,7 +191,7 @@ function runCommand({ command, cwd, timeoutMs }, { signal } = {}) {
 			stderr.append(stderrDecoder.end())
 			if (error) stderr.append(String(error.message || error))
 			const exitCode = code ?? -1
-			auditLog("run_command", "finished", {
+				log(exitCode === 0 ? "info" : "error", "run_command", "finished", {
 				code: exitCode,
 				elapsedMs: Date.now() - startedAt,
 				timedOut,
