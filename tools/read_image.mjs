@@ -14,7 +14,7 @@ import {
 	RASTER_MIME_TYPES,
 } from "../lib/config.mjs"
 import { resolvePath } from "../lib/paths.mjs"
-import { log } from "../lib/rpc.mjs"
+import { auditLog } from "../lib/audit-log.mjs"
 
 export const name = "read_image"
 
@@ -113,6 +113,6 @@ async function readImage({ path, maxSize }) {
 
 export async function call(args) {
 	const { data, mimeType } = await readImage(args || {})
-	log(`read_image ${JSON.stringify(args && args.path)} -> ok (${mimeType})`)
+	auditLog("read_image", "finished", { outcome: "ok", mimeType })
 	return { content: [{ type: "image", data, mimeType }] }
 }

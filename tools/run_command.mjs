@@ -11,7 +11,8 @@ import { existsSync } from "node:fs"
 import { delimiter, join } from "node:path"
 import { StringDecoder } from "node:string_decoder"
 import { SANDBOX_DIR, DEFAULT_TIMEOUT_MS, MAX_TIMEOUT_MS } from "../lib/config.mjs"
-import { log, truncate } from "../lib/rpc.mjs"
+import { auditLog } from "../lib/audit-log.mjs"
+import { truncate } from "../lib/rpc.mjs"
 import { resolvePath } from "../lib/paths.mjs"
 import { getAgentsMdBlock } from "../lib/agentsMd.mjs"
 
@@ -159,7 +160,7 @@ function runCommand({ command, cwd, timeoutMs }) {
 			activeChildren.delete(child)
 			stdout += stdoutDecoder.end()
 			stderr += stderrDecoder.end()
-			log(`cmd=${JSON.stringify(command)} cwd=${JSON.stringify(workDir)} exit=${code} timedOut=${timedOut}`)
+			auditLog("run_command", "finished", { code: code ?? -1, timedOut })
 			resolve({ code, stdout: truncate(stdout), stderr: truncate(stderr), timedOut })
 		}
 		const timer = setTimeout(() => {

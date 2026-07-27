@@ -12,7 +12,7 @@
 import { readFileSync, readdirSync, statSync } from "node:fs"
 import { join, basename } from "node:path"
 import { SKILLS_ROOT } from "../lib/config.mjs"
-import { log } from "../lib/rpc.mjs"
+import { auditLog } from "../lib/audit-log.mjs"
 
 function parseFrontmatter(content) {
 	const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/)
@@ -116,7 +116,7 @@ export async function call(args) {
 	const skill = catalogByKey[key]
 	if (!skill) {
 		const available = catalog.map((s) => s.key).join(", ") || "(\u65e0)"
-		log(`load_skills ${JSON.stringify(key)} -> not found`)
+		auditLog("load_skills", "finished", { outcome: "not_found" })
 		return {
 			content: [{ type: "text", text: `\u672a\u627e\u5230\u6280\u80fd "${key}"\u3002\u53ef\u7528\u6280\u80fd key\uff1a${available}` }],
 			isError: true,
@@ -126,10 +126,10 @@ export async function call(args) {
 	try {
 		content = readFileSync(join(skill.dir, "SKILL.md"), "utf-8")
 	} catch (err) {
-		log(`load_skills ${JSON.stringify(key)} -> read failed: ${err && err.message ? err.message : err}`)
+		auditLog("load_skills", "finished", { outcome: "read_failed", errorType: err?.name || "Error" })
 		return { content: [{ type: "text", text: `\u8bfb\u53d6\u5931\u8d25\uff1a${err}` }], isError: true }
 	}
-	log(`load_skills ${JSON.stringify(key)} -> ok`)
+	auditLog("load_skills", "finished", { outcome: "ok" })
 	return {
 		content: [{ type: "text", text: `\u76ee\u5f55\uff1a${skill.dir}\n\n${content}` }],
 		isError: false,

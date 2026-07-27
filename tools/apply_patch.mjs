@@ -8,7 +8,7 @@
 import { readFile, writeFile, mkdir, unlink, stat } from "node:fs/promises"
 import { dirname } from "node:path"
 import { resolvePath } from "../lib/paths.mjs"
-import { log } from "../lib/rpc.mjs"
+import { auditLog } from "../lib/audit-log.mjs"
 import { getAgentsMdBlock } from "../lib/agentsMd.mjs"
 
 export const name = "apply_patch"
@@ -131,7 +131,7 @@ export async function call(args) {
 	for (const op of operations) {
 		const result = await applyOperation(op)
 		results.push(result)
-		log(`apply_patch ${result.type} ${JSON.stringify(result.path)} -> ${result.status}`)
+		auditLog("apply_patch", "operation", { operation: result.type || "unknown", outcome: result.status })
 	}
 	const text = results
 		.map((r) => `[${r.status}] ${r.type} ${r.path}${r.output ? ` \u2014 ${r.output}` : ""}`)
