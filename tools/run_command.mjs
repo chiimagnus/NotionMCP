@@ -79,15 +79,23 @@ export const definition = {
 
 // 进程退出后给 stdio 排空剩余数据的宽限。
 const STDIO_FLUSH_GRACE_MS = 2_000
+const activeChildren = new Set()
 
-// ponytail: Windows 上 child.kill() 只能杀掉 pwsh 本身，命令里用 Start-Process
-// 拉起的后台进程会活下来，并继续持有继承来的 stdout 写端。taskkill /T 连子
-// 孙一起杀 —— 跟 lib/up.mjs 里 killChild() 已经在用的做法保持一致。
+// ponytail: 只杀 shell 会留下继承 stdio 的子孙；Windows 用 taskkill /T，
+// Unix 把每条命令放进独立进程组后按组杀。吞吐量需要并发隔离时再换专用作业管理。
 function killTree(child) {
 	if (!child || !child.pid) return
 	if (process.platform === "win32") {
 		try {
-			spawnSync("taskkill.exe", ["/PID", String(child.pid), "/T", "/F"], { stdio: "ignore", timeout: 10_000 })
+			const result = spawnSync("taskkill.exe", ["/PID", String(child.pid), "/T", "/F"], {
+				stdio: "ignore",
+				timeout: 10_000,
+			})
+			if (!result.error && result.status === 0) return
+		} catch {}
+	} else {
+		try {
+			process.kill(-child.pid, "SIGKILL")
 			return
 		} catch {}
 	}
@@ -95,6 +103,10 @@ function killTree(child) {
 		child.kill("SIGKILL")
 	} catch {}
 }
+
+process.once("exit", () => {
+	for (const child of activeChildren) killTree(child)
+})
 
 function runCommand({ command, cwd, timeoutMs }) {
 	return new Promise((resolve) => {
@@ -120,7 +132,12 @@ function runCommand({ command, cwd, timeoutMs }) {
 			const args = process.platform === "win32" ? ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", winCommand] : ["-c", command]
 			// ponytail: 同一类编码问题的另一半——Python 在 ACP=936 的机器上往管道打印中文会直接
 			// 抛 UnicodeEncodeError，这两个环境变量一次性免掉，比每条命令自己 set 靠得住。
-			child = spawn(shell.path, args, { cwd: workDir, env: { ...process.env, PYTHONUTF8: "1", PYTHONIOENCODING: "utf-8" } })
+			child = spawn(shell.path, args, {
+				cwd: workDir,
+				detached: process.platform !== "win32",
+				env: { ...process.env, PYTHONUTF8: "1", PYTHONIOENCODING: "utf-8" },
+			})
+			activeChildren.add(child)
 		} catch (err) {
 			resolve({ code: -1, stdout: "", stderr: String(err), timedOut: false })
 			return
@@ -139,6 +156,7 @@ function runCommand({ command, cwd, timeoutMs }) {
 			settled = true
 			clearTimeout(timer)
 			clearTimeout(flushTimer)
+			activeChildren.delete(child)
 			stdout += stdoutDecoder.end()
 			stderr += stderrDecoder.end()
 			log(`cmd=${JSON.stringify(command)} cwd=${JSON.stringify(workDir)} exit=${code} timedOut=${timedOut}`)
@@ -170,6 +188,7 @@ function runCommand({ command, cwd, timeoutMs }) {
 			settled = true
 			clearTimeout(timer)
 			clearTimeout(flushTimer)
+			activeChildren.delete(child)
 			resolve({ code: -1, stdout, stderr: String(err), timedOut: false })
 		})
 	})
