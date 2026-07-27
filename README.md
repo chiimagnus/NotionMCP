@@ -19,3 +19,7 @@ NotionMCP 是一个单进程、无 Session 的 MCP server：Node 在 `127.0.0.1`
 把旧 `.env` 的 `MCP_PROXY_PORT` 改成 `MCP_PORT`，删除 `MCP_UPSTREAM_PORT`；外部 shell 中的通用 `MCP_SANDBOX_DIR` / `MCP_SKILLS_DIR` 改成当前平台专属 key。旧 `up.log` / `exec.log` 不再写入，可自行归档或删除，程序不会动用户历史文件。
 
 默认启动器独占本设备的 Funnel 配置：正常关闭时会执行一次 `tailscale funnel reset`，这会清除本设备的其他 Funnel route。需要共享 route 时不要使用默认启动器，应自行编排 HTTP server 与 Funnel。异常断电或 `SIGKILL` 可能留下指向已关闭端口的 route，恢复时手工执行一次 `tailscale funnel reset`。
+
+## 维护
+
+提交前运行 `npm test`；涉及请求或进程生命周期时再运行 `npm run test:soak`。

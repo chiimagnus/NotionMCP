@@ -10,6 +10,7 @@
 	"scripts": {
 		"start": "node lib/up.mjs",
 		"test": "node --test test/lifecycle.test.mjs",
+		"test:soak": "node --expose-gc test/soak.mjs",
 		"build": "node --check lib/up.mjs && node --check lib/mcp-http.mjs"
 	},
 	"dependencies": {
