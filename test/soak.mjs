@@ -6,7 +6,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 const ROOT = join(import.meta.dirname, "..")
-const TOKEN = "a".repeat(64)
+const TOKEN = "0123456789abcdef".repeat(4)
 const WARMUP_REQUESTS = 500
 const MEASURED_REQUESTS = 1_000
 const MAX_HEAP_DELTA = 16 * 1024 * 1024
