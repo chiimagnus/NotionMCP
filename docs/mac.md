@@ -2,76 +2,42 @@
 
 ## 前置条件
 
-安装 Node.js、Tailscale 和 OpenSSL。
+安装 Node.js 20.11+ 和 Tailscale。
 
 ## 配置
 
-在仓库根目录执行：
-
 ```bash
 cp .env.example .env
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+security add-generic-password -U -a "$USER" -s mcp-token -w
 ```
 
-编辑 `.env`，通常只需要修改 `MCP_SANDBOX_DIR_MACOS` 和 `MCP_SKILLS_DIR_MACOS`；端口冲突时再调整 `MCP_PROXY_PORT` 和 `MCP_UPSTREAM_PORT`。
+把 Node 生成的 64 位十六进制字符串粘贴到钥匙串密码提示中，并编辑 `.env`：
 
-## 一次性准备
-
-### 0. 安装依赖
-
-```bash
-npm install
+```dotenv
+MCP_PORT=8000
+MCP_SANDBOX_DIR_MACOS=~/AI-Share
+MCP_SKILLS_DIR_MACOS=~/.codex/skills
 ```
 
-启动器只使用本地安装并由 `package-lock.json` 锁定的 supergateway；缺少依赖时会直接报错，不再临时联网下载另一份。
-
-### 1. 把 Token 存进钥匙串
-
-```bash
-openssl rand -hex 32
-security add-generic-password -a "$USER" -s mcp-token -w
-security find-generic-password -a "$USER" -s mcp-token -w
-```
-
-将生成的 token 粘贴到 `security add-generic-password` 的密码提示中。
-第一次读取时点钥匙串弹窗里的「始终允许」。Token 不要写进仓库、Notion 页面或聊天记录。
-
-### 2. 首次开通 Tailscale Funnel
-
-首次使用时，在 Tailscale 管理后台开启 HTTPS 证书和 Funnel 权限。只允许 Funnel 指向 8000；不要暴露 8001。
+第一次读取时在钥匙串弹窗中选择「始终允许」。Token 不要写进仓库、Notion 页面或聊天记录。
 
 ## 启动
 
-仓库根目录执行：
-
 ```bash
+npm install
 chmod +x ./up.sh
 ./up.sh
 ```
 
-看到下面的成功提示后，保持终端运行：
+保持终端运行，按 `Control+C` 正常停止。服务只监听 `127.0.0.1:8000`；Tailscale Funnel 对外提供 `/mcp`。修改 `.env` 或增删 skill 后需要重启。
 
-```text
-✅ 8001 起来了
-✅ 8000 起来了
-✅ 鉴权生效（无 token → 401）
-✅ Funnel 已指向 8000
-```
+Notion 中选择 **Add connection → Custom MCP server**：
 
-按 `Control + C` 停止。若上次异常退出后 Funnel 仍在运行，执行：
-
-```bash
-tailscale funnel reset
-```
-
-supergateway 或 auth-proxy 中途意外退出时，启动器会每 5 秒重试，不需要手动重新执行 `up.sh`。MCP 使用无状态 HTTP 请求，不会因 Session 过期而离线。运行过程写入有界的 `mcp.log`。
-
-## Notion 配置
-
-Agent → **Add connection → Custom MCP server**
-
-| 字段 | 填什么 |
+| 字段 | 值 |
 | --- | --- |
-| Server URL | `https://<你的设备名>.<你的tailnet名>.ts.net/mcp` |
-| 鉴权方式 | **Bearer Token**，前缀选 `Bearer` |
-| Token | 钥匙串里的裸 token，不要再手动加 `Bearer` |
-| 权限 | 按需选择 |
+| Server URL | `https://<设备名>.<tailnet名>.ts.net/mcp` |
+| 鉴权方式 | Bearer Token |
+| Token | 钥匙串中的裸值 |
+
+默认启动器独占本设备 Funnel 配置，正常关闭会 reset 本设备的所有 Funnel route。需要共享 route 时请自行编排。异常断电后若 route 残留，运行 `tailscale funnel reset`。

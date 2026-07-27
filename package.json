@@ -3,12 +3,16 @@
 	"version": "1.1.0",
 	"private": true,
 	"type": "module",
-	"description": "把本地文件夹通过鉴权反向代理 + Tailscale Funnel 暴露成 MCP server，供 Notion AI 使用。",
+	"description": "把本地文件夹通过原生鉴权 Streamable HTTP + Tailscale Funnel 暴露成 MCP server。",
+	"engines": {
+		"node": ">=20.11"
+	},
 	"scripts": {
 		"start": "node lib/up.mjs",
-		"test": "node --test test/lifecycle.test.mjs"
+		"test": "node --test test/lifecycle.test.mjs",
+		"build": "node --check lib/up.mjs && node --check lib/mcp-http.mjs"
 	},
 	"dependencies": {
-		"supergateway": "^3.4.0"
+		"@modelcontextprotocol/sdk": "1.29.0"
 	}
 }
