@@ -20,6 +20,14 @@ MCP_SANDBOX_DIR_MACOS=~/AI-Share
 MCP_SKILLS_DIR_MACOS=~/.codex/skills
 ```
 
+用启动器实际采用的查询条件验证读取：
+
+```bash
+security find-generic-password -a "$USER" -s mcp-token -w
+```
+
+该命令会直接输出裸 Token；只在自己的终端执行，不要复制到聊天或日志中。
+
 第一次读取时在钥匙串弹窗中选择「始终允许」。Token 不要写进仓库、Notion 页面或聊天记录。
 
 ## 启动
