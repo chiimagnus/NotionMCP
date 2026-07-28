@@ -335,13 +335,15 @@ test("read_image 只读取普通文件并对输入输出施加 10 MiB 上限", a
 		await handle.truncate(10 * 1024 * 1024 + 1)
 		await handle.close()
 		const result = await runImageTool(config, { path: large })
-		assert.match(result.error, /observed \d+ bytes, limit 10485760/)
+		assert.equal(result.result.isError, true)
+		assert.match(result.result.content[0].text, /observed \d+ bytes, limit 10485760/)
 	}
 
 	const directoryImage = join(dir, "directory.png")
 	await mkdir(directoryImage)
 	const special = await runImageTool(config, { path: directoryImage })
-	assert.match(special.error, /regular file/)
+	assert.equal(special.result.isError, true)
+	assert.match(special.result.content[0].text, /regular file/)
 })
 
 test("read_image 严格校验 maxSize，预取消不读取文件", async (t) => {
@@ -352,7 +354,8 @@ test("read_image 严格校验 maxSize，预取消不读取文件", async (t) => 
 	await writeFile(image, "image")
 	for (const maxSize of [0, -1, 1.5, "1", 2_001]) {
 		const result = await runImageTool(config, { path: image, maxSize })
-		assert.match(result.error, /maxSize must be an integer/)
+		assert.equal(result.result.isError, true)
+		assert.match(result.result.content[0].text, /maxSize must be an integer/)
 	}
 	const cancelled = await runImageTool(config, { path: join(dir, "missing.png") }, 0)
 	assert.equal(cancelled.name, "AbortError")
