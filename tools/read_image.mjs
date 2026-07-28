@@ -28,7 +28,7 @@ export const definition = {
 	name,
 	title: "读取图片",
 	description:
-		"读取一个图片文件，并把它作为可查看的图像内容返回（而不只是原始字节或标记文本），这样调用方模型才能真正“看到”这张图。SVG 文件会先通过平台上的栅格化工具转成 PNG：macOS 使用 qlmanage，Linux/Windows 使用 ImageMagick（magick）或 rsvg-convert。相对路径会基于沙盒文件夹（" +
+		"读取一个图片文件，并把它作为可查看的图像内容返回（而不只是原始字节或标记文本），这样调用方模型才能真正“看到”这张图。默认会把图片缩放到 maxSize 以内以节省 token（位图和 SVG 都适用）；传 detail: \"original\" 可以跳过缩放、拿到原始分辨率。SVG 文件会先通过平台上的栅格化工具转成 PNG：macOS 使用 qlmanage，Linux/Windows 使用 ImageMagick（magick）或 rsvg-convert；位图缩放失败时会自动降级为返回原图，不报错。相对路径会基于沙盒文件夹（" +
 		SANDBOX_DIR +
 		"）解析；也支持绝对路径。",
 	inputSchema: {
@@ -37,7 +37,12 @@ export const definition = {
 			path: { type: "string", description: "图片文件的路径（.svg、.png、.jpg、.jpeg、.gif、.webp）。相对路径会基于沙盒文件夹解析。" },
 			maxSize: {
 				type: "number",
-				description: `可选，栅格化 SVG 时的最大像素尺寸（默认 ${DEFAULT_IMAGE_MAX_SIZE}，最大 ${MAX_IMAGE_MAX_SIZE}）。对已经是位图格式的文件无效。`,
+				description: `可选，缩放的最大像素尺寸（默认 ${DEFAULT_IMAGE_MAX_SIZE}，最大 ${MAX_IMAGE_MAX_SIZE}）。detail 为 "original" 时忽略此参数。`,
+			},
+			detail: {
+				type: "string",
+				enum: ["high", "original"],
+				description: "图片精度。默认 high：缩放到 maxSize 以内节省 token；original：跳过缩放，位图原样返回，SVG 按允许的最大尺寸栅格化。",
 			},
 		},
 		required: ["path"],
@@ -230,7 +235,59 @@ async function rasterizeSvgToPng(svgBytes, maxSize, signal) {
 	}
 }
 
-async function readImage({ path, maxSize }, signal) {
+// ponytail: 照抄 codex view_image 的 detail: high/original 思路。位图缩放失败/工具缺失时
+// 降级返回原图而不是报错——跟 SVG 不同，位图本身已经是可查看格式，缩放只是省 token 的锦上添
+// 花，不该因为主机没装 ImageMagick 就让整个 read_image 挂掉。返回 null 表示降级。
+async function resizeRasterToBytes(inputBytes, ext, maxSize, signal) {
+	if (signal?.aborted) throw abortError()
+	const outDir = await mkdtemp(join(tmpdir(), "raster-resize-"))
+	const inputPath = join(outDir, `input${ext}`)
+	try {
+		await writeFile(inputPath, inputBytes, { signal })
+		if (process.platform === "darwin") {
+			// qlmanage 只吐 PNG 缩略图，位图输入的原始格式在这条路径上保不住。
+			const outputPath = join(outDir, `${basename(inputPath)}.png`)
+			const result = await runRasterizer("qlmanage", ["-t", "-s", String(maxSize), "-o", outDir, inputPath], { signal })
+			if (result.cancelled) throw abortError("Image resize cancelled")
+			if (result.code !== 0) return null
+			try {
+				return { data: await readBoundedFile(outputPath, { signal, label: "Resized image" }), mimeType: "image/png" }
+			} catch (err) {
+				if (err.name === "AbortError") throw err
+				return null
+			}
+		}
+		const outputPath = join(outDir, `output${ext}`)
+		const resize = `${maxSize}x${maxSize}>`
+		const candidates = [
+			["magick", [inputPath, "-resize", resize, outputPath]],
+			["convert", [inputPath, "-resize", resize, outputPath]],
+		]
+		for (const [command, args] of candidates) {
+			const result = await runRasterizer(command, args, { signal })
+			if (result.cancelled) throw abortError("Image resize cancelled")
+			if (result.code !== 0) continue
+			try {
+				return { data: await readBoundedFile(outputPath, { signal, label: "Resized image" }), mimeType: null }
+			} catch (err) {
+				if (err.name === "AbortError") throw err
+			}
+		}
+		return null
+	} finally {
+		await rm(outDir, { recursive: true, force: true }).catch((err) => {
+			log("error", "read_image", "temp_cleanup_failed", { error: err })
+		})
+	}
+}
+
+function parseDetail(detail) {
+	if (detail === undefined) return "high"
+	if (detail === "high" || detail === "original") return detail
+	throw new Error(`detail must be 'high' or 'original', got '${detail}'`)
+}
+
+async function readImage({ path, maxSize, detail }, signal) {
 	if (signal?.aborted) throw abortError()
 	if (!path || typeof path !== "string") {
 		throw new Error("Missing required 'path' string")
@@ -238,14 +295,24 @@ async function readImage({ path, maxSize }, signal) {
 	const resolved = resolvePath(path)
 	const ext = extname(resolved).toLowerCase()
 	const size = imageSize(maxSize)
+	const wantsOriginal = parseDetail(detail) === "original"
 
 	if (RASTER_MIME_TYPES[ext]) {
 		const buf = await readBoundedFile(resolved, { signal })
-		return { data: buf.toString("base64"), mimeType: RASTER_MIME_TYPES[ext] }
+		if (wantsOriginal) {
+			return { data: buf.toString("base64"), mimeType: RASTER_MIME_TYPES[ext] }
+		}
+		const resized = await resizeRasterToBytes(buf, ext, size, signal)
+		if (!resized) {
+			log("warning", "read_image", "raster_resize_skipped", { reason: "resize tool unavailable or failed" })
+			return { data: buf.toString("base64"), mimeType: RASTER_MIME_TYPES[ext] }
+		}
+		return { data: resized.data.toString("base64"), mimeType: resized.mimeType || RASTER_MIME_TYPES[ext] }
 	}
 	if (ext === ".svg") {
 		const svg = await readBoundedFile(resolved, { signal, label: "SVG input" })
-		const buf = await rasterizeSvgToPng(svg, size, signal)
+		const rasterSize = wantsOriginal ? MAX_IMAGE_MAX_SIZE : size
+		const buf = await rasterizeSvgToPng(svg, rasterSize, signal)
 		return { data: buf.toString("base64"), mimeType: "image/png" }
 	}
 	throw new Error(`Unsupported image extension '${ext}'. Supported: .svg .png .jpg .jpeg .gif .webp`)
