@@ -425,6 +425,23 @@ test("run_command 在 data 阶段限制输出并保留拆分的 UTF-8", async (t
 	assert.equal(text.match(/\.\.\.\[truncated, 169 more chars\]/g)?.length, 2)
 })
 
+test("run_command 清理 stdout 和 stderr 中的 ANSI 控制序列", async (t) => {
+	const dir = await mkdtemp(join(tmpdir(), "notionmcp-ansi-"))
+	t.after(() => rm(dir, { recursive: true, force: true }))
+	const config = await configFile(dir)
+	const helper = join(dir, "ansi.cjs")
+	await writeFile(
+		helper,
+		`process.stdout.write("\\u001b[32;1mMode\\u001b[0m");process.stderr.write("\\u001b[31mWarning\\u001b[0m")\n`,
+	)
+
+	const result = await runCommandTool(config, { command: nodeCommand(helper) })
+	const text = result.content[0].text
+	assert.match(text, /--- stdout ---\nMode/)
+	assert.match(text, /--- stderr ---\nWarning/)
+	assert.doesNotMatch(text, /\u001b/)
+})
+
 test("run_command 的 Abort、timeout 和退出兜底都清理整棵进程树", async (t) => {
 	const dir = await mkdtemp(join(tmpdir(), "notionmcp-tree-"))
 	t.after(() => rm(dir, { recursive: true, force: true }))
