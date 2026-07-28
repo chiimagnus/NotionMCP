@@ -1004,7 +1004,7 @@ test("四个工具均经真实 HTTP 到达，apply_patch 在取消边界停止�
 	assert.equal(await readFile(join(operationDir, "199.txt"), "utf8").catch(() => null), null)
 })
 
-test("命令失败日志保留 stderr 尾部但不记录命令、stdout 或 Token", async (t) => {
+test("命令业务失败以 warning 保留 stderr 尾部但不记录命令、stdout 或 Token", async (t) => {
 	const { lifecycle, port, token } = await startMcpServer(t)
 	const helper = join(httpFixture.dir, "http-failure.cjs")
 	const stdoutMarker = "STDOUT_MUST_NOT_BE_LOGGED"
@@ -1023,7 +1023,7 @@ test("命令失败日志保留 stderr 尾部但不记录命令、stdout 或 Toke
 	const text = await readFile(join(httpFixture.dir, "http.log"), "utf8")
 	const records = text.trimEnd().split("\n").map(JSON.parse)
 	const failure = records.findLast((record) => record.scope === "run_command" && record.code === 7)
-	assert.equal(failure.level, "error")
+	assert.equal(failure.level, "warning")
 	assert.match(failure.message, /exited with code 7/)
 	assert.match(failure.stderr, new RegExp(stderrMarker))
 	assert.doesNotMatch(JSON.stringify(failure), new RegExp(token))
