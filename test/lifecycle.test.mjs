@@ -183,7 +183,10 @@ test("旧日志 writer 已从运行路径删除", async () => {
 })
 
 async function waitForPid(file) {
-	for (let i = 0; i < 40; i += 1) {
+	// ponytail: 满负载跑完整测试套件时，Windows 上密集的 pwsh/node 进程连续启动会被杀毒软件的
+	// 实时扫描拖慢；单独跑这个测试时 180ms 左右就能写完 PID，但套件里跑到这一条时偶发要更久。
+	// 把预算从 2s 提到 6s，给慢机器留够余量，不改变正常情况下的快速返回。
+	for (let i = 0; i < 120; i += 1) {
 		try {
 			return Number(await readFile(file, "utf8"))
 		} catch {
@@ -209,7 +212,12 @@ function quoteShellArg(value) {
 }
 
 function nodeCommand(script, ...args) {
-	return [process.execPath, script, ...args].map(quoteShellArg).join(" ")
+	const invocation = [process.execPath, script, ...args].map(quoteShellArg).join(" ")
+	// PowerShell 7 (pwsh) 需要调用运算符 & 才能执行以带引号字符串开头的命令；没有 & 时
+	// PowerShell 会把第一个带引号字符串当成表达式语句，后面紧跟的字符串就会触发
+	// "Unexpected token ... in expression or statement" 解析错误。cmd.exe/sh 没有这个
+	// 限制，所以只在 win32 上加。
+	return process.platform === "win32" ? `& ${invocation}` : invocation
 }
 
 async function runCommandTool(config, args, abortAfterMs) {
@@ -449,12 +457,16 @@ test("run_command 的 Abort、timeout 和退出兜底都清理整棵进程树", 
 	const helper = join(dir, "tree.cjs")
 	await writeFile(
 		helper,
-		`const{spawn}=require("node:child_process");const{writeFileSync}=require("node:fs");const mode=process.argv[2];if(mode==="grand"){writeFileSync(process.argv[3],String(process.pid));setInterval(()=>{},1000)}else{writeFileSync(process.argv[3],String(process.pid));spawn(process.execPath,[__filename,"grand",process.argv[4]],{stdio:mode==="inherit"?["ignore","inherit","inherit"]:"ignore"});if(mode==="inherit")process.exit(0);setInterval(()=>{},1000)}\n`,
+		`const{spawn}=require("node:child_process");const{writeFileSync,existsSync}=require("node:fs");const mode=process.argv[2];if(mode==="grand"){writeFileSync(process.argv[3],String(process.pid));setInterval(()=>{},1000)}else{writeFileSync(process.argv[3],String(process.pid));const grandFile=process.argv[4];spawn(process.execPath,[__filename,"grand",grandFile],{stdio:mode==="inherit"?["ignore","inherit","inherit"]:"ignore"});if(mode==="inherit"){const deadline=Date.now()+2000;while(!existsSync(grandFile)&&Date.now()<deadline){Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,10)}process.exit(0)}setInterval(()=>{},1000)}\n`,
 	)
 
+	// ponytail: Windows 上命令是经过 pwsh 再 fork node 的，加上杀毒软件实时扫描，光启动就很容易接近或超过 200ms。
+	// 如果 abort/timeout 在进程还没来得及写 PID 文件前就把整棵树杀掉，测试会假阳性失败（非逻辑问题）。
+	// 非 Windows 环境直接 exec，没这个开销，继续用紧凑的 200ms 验证真实的 abort/timeout 时序。
+	const spawnGraceMs = process.platform === "win32" ? 1_500 : 200
 	for (const [kind, abortAfterMs, timeoutMs] of [
-		["abort", 200, 5_000],
-		["timeout", undefined, 200],
+		["abort", spawnGraceMs, 5_000],
+		["timeout", undefined, spawnGraceMs],
 	]) {
 		const parentFile = join(dir, `${kind}-parent.pid`)
 		const grandFile = join(dir, `${kind}-grand.pid`)
