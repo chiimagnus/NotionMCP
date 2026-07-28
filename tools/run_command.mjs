@@ -56,6 +56,27 @@ function describeShellForHumans() {
 
 const SHELL_LABEL = describeShellForHumans()
 
+// ponytail: 照抄 codex shell_command 的思路——用具体命令示例教模型把 bash 习惯翻译成
+// PowerShell，并且把“这是无沙盒环境”的破坏性操作护栏直接写进 description 里，而不是
+// 指望模型自己小心。Windows 专属的例子/护栏只在 win32 上拼进去。
+const WINDOWS_SHELL_GUIDANCE = `
+常见 bash 习惯到 PowerShell 的对照：
+- 列出隐藏文件（ls -a）：Get-ChildItem -Force
+- 递归按文件名找文件：Get-ChildItem -Recurse -Filter *.py
+- 递归 grep（这台机器不一定装了 ripgrep）：Get-ChildItem -Recurse | Select-String -Pattern 'TODO'
+- 看进程（ps aux | grep python）：Get-Process | Where-Object { $_.ProcessName -like '*python*' }
+- 设置环境变量：$env:FOO='bar'; echo $env:FOO
+
+安全护栏（这台机器没有沙盒边界，命令是真实生效的）：
+- 递归删除/移动前，先确认解析出的绝对路径确实落在预期目录里，不要对没检查过的路径做递归删除/移动。
+- 不要把“用一个 shell 枚举路径、再传给另一个 shell/命令删除或移动”这种跨 shell 组合写法；一次操作从头到尾用同一个 shell，优先用 Remove-Item/Move-Item 等原生 cmdlet。
+- 用 Start-Process 拉后台/长驻进程时，除非用户明确要看得见的交互窗口，默认加 -WindowStyle Hidden。`.trim()
+
+const NON_WINDOWS_SAFETY_GUIDANCE =
+	"安全护栏（这台机器没有沙盒边界，命令是真实生效的）：递归删除/移动前，先确认解析出的绝对路径确实落在预期目录里，不要对没检查过的路径做递归删除/移动。"
+
+const RUN_COMMAND_GUIDANCE = process.platform === "win32" ? WINDOWS_SHELL_GUIDANCE : NON_WINDOWS_SAFETY_GUIDANCE
+
 export const name = "run_command"
 
 export const definition = {
@@ -64,12 +85,16 @@ export const definition = {
 	description:
 		`在这台机器上通过 ${SHELL_LABEL} 执行一条命令。默认工作目录是 ` +
 		SANDBOX_DIR +
-		"。注意：这不是一个严格的沙盒环境——命令仍然可以访问工作目录之外的路径（例如绝对路径、切换目录等）。可用于运行 python/pip、编辑文件、生成图片/SVG、跑训练脚本，以及其他任意命令行任务。",
+		"。注意：这不是一个严格的沙盒环境——命令仍然可以访问工作目录之外的路径（例如绝对路径、切换目录等）。可用于运行 python/pip、编辑文件、生成图片/SVG、跑训练脚本，以及其他任意命令行任务。\n\n" +
+		RUN_COMMAND_GUIDANCE,
 	inputSchema: {
 		type: "object",
 		properties: {
 			command: { type: "string", description: "要执行的 shell 命令。" },
-			cwd: { type: "string", description: "可选，相对于沙盒文件夹的子目录。" },
+			cwd: {
+				type: "string",
+				description: "可选，相对于沙盒文件夹的子目录。优先使用这个参数，不要在命令里用 cd/Set-Location 切换目录。",
+			},
 			timeoutMs: {
 				type: "number",
 				description: `可选，超时时间（毫秒，默认 ${DEFAULT_TIMEOUT_MS}，最大 ${MAX_TIMEOUT_MS}）。执行模型训练等长耗时任务时可以调大这个值。`,
@@ -169,9 +194,13 @@ function runCommand({ command, cwd, timeoutMs }, { signal } = {}) {
 		}
 		let child
 		try {
+			// ponytail: pwsh.exe 自己的进程退出码默认不会等于最后一个原生命令的 $LASTEXITCODE（它自己成功就返回 0，不管被调用的
+			// exe 退出码是多少），导致 node -e "process.exit(7)" 这类命令在 Windows 上总是报成 "exit code: 1"。
+			// 在用户命令后面追加一句显式把 $LASTEXITCODE 传递出去；只在它非 $null 时（确实跑过原生命令）才生效，
+			// 纯 cmdlet 命令（$LASTEXITCODE 一直是 $null）不受影响。
 			const winCommand =
 				process.platform === "win32"
-					? `[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); $OutputEncoding = [Console]::OutputEncoding; $PSDefaultParameterValues['*:Encoding'] = 'utf8'; ${command}`
+					? `[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); $OutputEncoding = [Console]::OutputEncoding; $PSDefaultParameterValues['*:Encoding'] = 'utf8'; ${command}\nif ($null -ne $LASTEXITCODE) { exit $LASTEXITCODE }`
 					: command
 			const args = process.platform === "win32" ? ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", winCommand] : ["-c", command]
 			// ponytail: 同一类编码问题的另一半——Python 在 ACP=936 的机器上往管道打印中文会直接
