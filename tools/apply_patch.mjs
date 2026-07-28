@@ -18,7 +18,7 @@ export const definition = {
 	name,
 	title: "编辑文件",
 	description:
-		"在一次调用里对文件做批量的新建 / 修改 / 删除操作。每个 operation 独立执行、独立返回成功或失败，不会因为某一个失败就回滚其他已完成的操作。修改文件（update_file）使用精确字符串替换（oldStr/newStr），oldStr 必须在文件中唯一出现，除非设置 replaceAll。相对路径基于沙盒文件夹解析，也支持绝对路径——和 run_command 一样，这不是一个严格的沙盒边界。",
+		'通过 operations 数组批量新建、修改或删除文件。操作格式：create_file 使用 { type, path, content, overwrite? }；update_file 使用 { type, path, edits: [{ oldStr, newStr, replaceAll? }] }；delete_file 使用 { type, path }。完整修改示例：{"operations":[{"type":"update_file","path":"notes.txt","edits":[{"oldStr":"旧文本","newStr":"新文本"}]}]}。operations 按顺序执行，每项独立返回结果；某项失败不会回滚其他已完成项。oldStr 必须唯一匹配，除非设置 replaceAll。相对路径基于沙盒文件夹解析，也支持绝对路径——和 run_command 一样，这不是一个严格的沙盒边界。',
 	inputSchema: {
 		type: "object",
 		properties: {

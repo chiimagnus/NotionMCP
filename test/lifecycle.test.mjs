@@ -335,13 +335,15 @@ test("read_image 只读取普通文件并对输入输出施加 10 MiB 上限", a
 		await handle.truncate(10 * 1024 * 1024 + 1)
 		await handle.close()
 		const result = await runImageTool(config, { path: large })
-		assert.match(result.error, /observed \d+ bytes, limit 10485760/)
+		assert.equal(result.result.isError, true)
+		assert.match(result.result.content[0].text, /observed \d+ bytes, limit 10485760/)
 	}
 
 	const directoryImage = join(dir, "directory.png")
 	await mkdir(directoryImage)
 	const special = await runImageTool(config, { path: directoryImage })
-	assert.match(special.error, /regular file/)
+	assert.equal(special.result.isError, true)
+	assert.match(special.result.content[0].text, /regular file/)
 })
 
 test("read_image 严格校验 maxSize，预取消不读取文件", async (t) => {
@@ -352,7 +354,8 @@ test("read_image 严格校验 maxSize，预取消不读取文件", async (t) => 
 	await writeFile(image, "image")
 	for (const maxSize of [0, -1, 1.5, "1", 2_001]) {
 		const result = await runImageTool(config, { path: image, maxSize })
-		assert.match(result.error, /maxSize must be an integer/)
+		assert.equal(result.result.isError, true)
+		assert.match(result.result.content[0].text, /maxSize must be an integer/)
 	}
 	const cancelled = await runImageTool(config, { path: join(dir, "missing.png") }, 0)
 	assert.equal(cancelled.name, "AbortError")
@@ -420,6 +423,23 @@ test("run_command 在 data 阶段限制输出并保留拆分的 UTF-8", async (t
 	assert.match(text, /中x+/)
 	assert.doesNotMatch(text, /\uFFFD/)
 	assert.equal(text.match(/\.\.\.\[truncated, 169 more chars\]/g)?.length, 2)
+})
+
+test("run_command 清理 stdout 和 stderr 中的 ANSI 控制序列", async (t) => {
+	const dir = await mkdtemp(join(tmpdir(), "notionmcp-ansi-"))
+	t.after(() => rm(dir, { recursive: true, force: true }))
+	const config = await configFile(dir)
+	const helper = join(dir, "ansi.cjs")
+	await writeFile(
+		helper,
+		`process.stdout.write("\\u001b[32;1mMode\\u001b[0m");process.stderr.write("\\u001b[31mWarning\\u001b[0m")\n`,
+	)
+
+	const result = await runCommandTool(config, { command: nodeCommand(helper) })
+	const text = result.content[0].text
+	assert.match(text, /--- stdout ---\nMode/)
+	assert.match(text, /--- stderr ---\nWarning/)
+	assert.doesNotMatch(text, /\u001b/)
 })
 
 test("run_command 的 Abort、timeout 和退出兜底都清理整棵进程树", async (t) => {
@@ -1001,7 +1021,7 @@ test("四个工具均经真实 HTTP 到达，apply_patch 在取消边界停止�
 	assert.equal(await readFile(join(operationDir, "199.txt"), "utf8").catch(() => null), null)
 })
 
-test("命令失败日志保留 stderr 尾部但不记录命令、stdout 或 Token", async (t) => {
+test("命令业务失败以 warning 保留 stderr 尾部但不记录命令、stdout 或 Token", async (t) => {
 	const { lifecycle, port, token } = await startMcpServer(t)
 	const helper = join(httpFixture.dir, "http-failure.cjs")
 	const stdoutMarker = "STDOUT_MUST_NOT_BE_LOGGED"
@@ -1020,7 +1040,7 @@ test("命令失败日志保留 stderr 尾部但不记录命令、stdout 或 Toke
 	const text = await readFile(join(httpFixture.dir, "http.log"), "utf8")
 	const records = text.trimEnd().split("\n").map(JSON.parse)
 	const failure = records.findLast((record) => record.scope === "run_command" && record.code === 7)
-	assert.equal(failure.level, "error")
+	assert.equal(failure.level, "warning")
 	assert.match(failure.message, /exited with code 7/)
 	assert.match(failure.stderr, new RegExp(stderrMarker))
 	assert.doesNotMatch(JSON.stringify(failure), new RegExp(token))

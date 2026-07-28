@@ -10,6 +10,7 @@ import { spawn } from "node:child_process"
 import { existsSync } from "node:fs"
 import { delimiter, join } from "node:path"
 import { StringDecoder } from "node:string_decoder"
+import { stripVTControlCharacters } from "node:util"
 import { SANDBOX_DIR, DEFAULT_TIMEOUT_MS, MAX_OUTPUT_CHARS, MAX_TIMEOUT_MS } from "../lib/config.mjs"
 import { log } from "../lib/log.mjs"
 import { registerChild, terminateProcessTree, unregisterChild } from "../lib/process-tree.mjs"
@@ -100,7 +101,8 @@ function outputCollector() {
 			discarded += chunk.length - kept
 		},
 		value() {
-			return discarded ? `${text}\n...[truncated, ${discarded} more chars]` : text
+			const plainText = stripVTControlCharacters(text)
+			return discarded ? `${plainText}\n...[truncated, ${discarded} more chars]` : plainText
 		},
 	}
 }
