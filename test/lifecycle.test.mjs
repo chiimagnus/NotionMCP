@@ -642,7 +642,7 @@ const TOOLS_LIST = { jsonrpc: "2.0", id: 99, method: "tools/list", params: {} }
 async function assertHttpHealthy(lifecycle, port, token) {
 	const response = await mcpRequest(port, token, TOOLS_LIST)
 	assert.equal(response.status, 200)
-	assert.equal(JSON.parse(response.body).result.tools.length, 6)
+	assert.equal(JSON.parse(response.body).result.tools.length, 7)
 	assert.equal(response.headers["mcp-session-id"], undefined)
 	assert.equal(lifecycle.activeRequestCount, 0)
 }
@@ -802,7 +802,7 @@ test("原生无状态 HTTP 完成基础 MCP 协议且可确定关闭", async (t)
 	assert.equal(JSON.parse(responses[0].body).result.serverInfo.name, "notionmcp")
 	assert.equal(responses[1].status, 202)
 	assert.equal(JSON.parse(responses[2].body).result !== undefined, true)
-	assert.equal(JSON.parse(responses[3].body).result.tools.length, 6)
+	assert.equal(JSON.parse(responses[3].body).result.tools.length, 7)
 	assert.equal(JSON.parse(responses[4].body).error.code, -32602)
 	assert.equal(lifecycle.activeRequestCount, 0)
 
@@ -1038,7 +1038,7 @@ test("十个长请求占满 slot，第十一个和 batch 都不能启动命令",
 	assert.equal(events.failed || 0, 0)
 })
 
-test("六个工具均经真实 HTTP 到达，apply_patch 在取消边界停止后续写入", async (t) => {
+test("七个工具均经真实 HTTP 到达，apply_patch 在取消边界停止后续写入", async (t) => {
 	const { lifecycle, port, token } = await startMcpServer(t)
 	const commandHelper = join(httpFixture.dir, "http-output.cjs")
 	await writeFile(commandHelper, `process.stdout.write("via-http")\n`)
@@ -1052,6 +1052,9 @@ test("六个工具均经真实 HTTP 到达，apply_patch 在取消边界停止�
 			operations: [{ type: "create_file", path: patched, content: "created", overwrite: true }],
 		}, 22),
 		toolCall("load_skills", { name: "fixture-skill" }, 23),
+		toolCall("read_file", { path: patched }, 24),
+		toolCall("project_context", { cwd: httpFixture.dir }, 25),
+		toolCall("search_skills", { query: "test skill" }, 26),
 	]
 	const responses = []
 	for (const call of calls) responses.push(await mcpRequest(port, token, call))
@@ -1060,6 +1063,9 @@ test("六个工具均经真实 HTTP 到达，apply_patch 在取消边界停止�
 	assert.equal(JSON.parse(responses[1].body).result.content[0].data, Buffer.from([1, 2, 3]).toString("base64"))
 	assert.equal(await readFile(patched, "utf8"), "created")
 	assert.match(JSON.parse(responses[3].body).result.content[0].text, /fixture-skill/)
+	assert.match(JSON.parse(responses[4].body).result.content[0].text, /created/)
+	assert.match(JSON.parse(responses[5].body).result.content[0].text, /project context/)
+	assert.match(JSON.parse(responses[6].body).result.content[0].text, /fixture-skill/)
 
 	const operationDir = join(httpFixture.dir, "cancelled-patch")
 	await mkdir(operationDir, { recursive: true })
@@ -1079,7 +1085,7 @@ test("六个工具均经真实 HTTP 到达，apply_patch 在取消边界停止�
 		sawWriteResolve()
 	})
 	t.after(() => watcher.close())
-	pending = openMcpRequest(port, token, toolCall("apply_patch", { operations }, 24))
+	pending = openMcpRequest(port, token, toolCall("apply_patch", { operations }, 27))
 	const settled = pending.response.catch(() => null)
 	await sawWrite
 	await settled

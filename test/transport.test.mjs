@@ -138,7 +138,7 @@ test("旧版 Streamable HTTP 探测、取消和后续请求互相隔离", async 
 
 	const initial = await legacyRequest(port, TOOLS_LIST)
 	assert.equal(initial.status, 200)
-	assert.equal(JSON.parse(initial.body).result.tools.length, 6)
+	assert.equal(JSON.parse(initial.body).result.tools.length, 7)
 	assert.equal(initial.headers["mcp-session-id"], undefined)
 
 	const getProbe = await request(port, { method: "GET" })
@@ -182,7 +182,7 @@ test("2026 Streamable HTTP 校验元数据且不破坏旧版 JSON 响应", async
 	const current = await modernRequest(port, MODERN_TOOLS_LIST)
 	assert.equal(current.status, 200)
 	assert.match(current.headers["content-type"], /^application\/json/)
-	assert.equal(JSON.parse(current.body).result.tools.length, 6)
+	assert.equal(JSON.parse(current.body).result.tools.length, 7)
 	const called = await modernRequest(port, MODERN_LOAD_SKILL, { "Mcp-Name": "load_skills" })
 	assert.equal(called.status, 200)
 	assert.match(JSON.parse(called.body).result.content[0].text, /fixture-skill/)
