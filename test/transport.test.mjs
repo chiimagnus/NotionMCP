@@ -7,6 +7,7 @@ import test, { after } from "node:test"
 
 const TOKEN = "0123456789abcdef".repeat(4)
 const MODERN_PROTOCOL_VERSION = "2026-07-28"
+const GET_COMPAT_PROTOCOL_VERSION = "2025-06-18"
 const MODERN_TOOLS_LIST = {
 	jsonrpc: "2.0",
 	id: 2,
@@ -112,7 +113,7 @@ function openStreamableSse(port) {
 			port,
 			path: "/mcp",
 			method: "GET",
-			headers: { Authorization: `Bearer ${TOKEN}`, Accept: "text/event-stream", "Mcp-Protocol-Version": MODERN_PROTOCOL_VERSION },
+		headers: { Authorization: `Bearer ${TOKEN}`, Accept: "text/event-stream", "Mcp-Protocol-Version": GET_COMPAT_PROTOCOL_VERSION },
 		})
 		req.once("error", reject)
 		req.once("response", (res) => {
@@ -327,6 +328,7 @@ test("2025 Streamable HTTP GET 保持轻量通知流，不创建旧 SSE 会话",
 	assert.equal((await modernRequest(port, MODERN_TOOLS_LIST)).status, 200)
 	const records = (await readFile(logFile, "utf8")).trimEnd().split("\n").map(JSON.parse)
 	const opened = records.findLast((record) => record.transport === "streamable_sse" && record.event === "sse_opened")
+	assert.equal(opened.mcpProtocol, GET_COMPAT_PROTOCOL_VERSION)
 	assert.equal(opened.streamableSseSessions, 1)
 	sse.close()
 	await waitFor(() => lifecycle.streamableSseCount === 0, "closed Streamable SSE did not leave the manager")
@@ -504,13 +506,18 @@ test("SSE 总容量只拒绝新流，不关闭既有 Streamable 或旧 SSE 连�
 })
 
 test("持有 SSE 时两轮十二条命令跨过并发阈值后恢复", async (t) => {
-	const { module, dir } = await getFixture()
+	const { module, dir, logFile } = await getFixture()
 	const lifecycle = module.createMcpHttpServer({ port: 0, token: TOKEN })
 	t.after(() => lifecycle.shutdown())
 	const { port } = await lifecycle.listen()
+	const logStart = (await readFile(logFile, "utf8").catch(() => "")).trimEnd().split("\n").filter(Boolean).length
 	const streams = []
 	for (let index = 0; index < 32; index += 1) streams.push(await openStreamableSse(port))
 	t.after(() => streams.forEach((stream) => stream.close()))
+	const streamRecords = (await readFile(logFile, "utf8")).trimEnd().split("\n").filter(Boolean).slice(logStart).map(JSON.parse)
+	const receivedStreams = streamRecords.filter((record) => record.transport === "streamable_sse" && record.event === "received")
+	assert.equal(receivedStreams.length, 32)
+	assert.ok(receivedStreams.every((record) => record.mcpProtocol === GET_COMPAT_PROTOCOL_VERSION))
 	const helper = join(dir, "concurrency-delay.cjs")
 	await writeFile(helper, `setTimeout(()=>process.stdout.write(process.argv[2]),300)\n`)
 	const command = (id) =>
