@@ -844,7 +844,7 @@ test("HTTP 路由、媒体类型和 body 上限失败后 server 仍可复用", a
 	const { lifecycle, port, token } = await startMcpServer(t)
 	assert.equal(lifecycle.httpServer.headersTimeout, 10_000)
 	assert.equal(lifecycle.httpServer.requestTimeout, 15_000)
-	assert.equal(lifecycle.httpServer.maxConnections, 32)
+	assert.equal(lifecycle.httpServer.maxConnections, 50)
 
 	const route = await httpRequest(port, { path: "/other", method: "POST" })
 	assert.equal(route.status, 404)

@@ -329,3 +329,35 @@ test("旧 HTTP+SSE 直接使用 Notion 配置的 /mcp 地址建立会话并调�
 		404,
 	)
 })
+
+test("旧 HTTP+SSE 替换空闲连接而不拒绝 Notion 重连", async (t) => {
+	const { module } = await getFixture()
+	const lifecycle = module.createMcpHttpServer({ port: 0, token: TOKEN })
+	t.after(() => lifecycle.shutdown())
+	const { port } = await lifecycle.listen()
+	const sessions = []
+	t.after(() => sessions.forEach((session) => session.close()))
+	for (let index = 0; index < 33; index += 1) sessions.push(await openSse(port))
+
+	const headers = { Authorization: `Bearer ${TOKEN}`, "Content-Type": "application/json" }
+	assert.equal(
+		(
+			await request(port, {
+				path: sessions[0].endpoint,
+				headers,
+				body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
+			})
+		).status,
+		404,
+	)
+	assert.equal(
+		(
+			await request(port, {
+				path: sessions.at(-1).endpoint,
+				headers,
+				body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} }),
+			})
+		).status,
+		202,
+	)
+})
