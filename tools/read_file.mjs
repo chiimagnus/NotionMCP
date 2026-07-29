@@ -61,6 +61,7 @@ export async function call(args, { signal } = {}) {
 			return failure("File is not valid UTF-8")
 		}
 		const lines = text.split(/\r?\n/)
+		if (range.start > lines.length) return failure("startLine is beyond end of file")
 		const end = Math.min(range.end || lines.length, lines.length)
 		const selected = lines.slice(range.start - 1, end)
 		log("info", "read_file", "finished", { outcome: "ok", count: selected.length })

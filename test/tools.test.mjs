@@ -34,6 +34,7 @@ test("read_file 只读 UTF-8 普通文件，并校验范围、大小、二进制
 	assert.match((await call({ path: join(dir, "text.txt") })).content[0].text, /one\ntwo\nthree/)
 	assert.equal((await call({ path: "missing.txt" })).isError, true)
 	assert.equal((await call({ path: "text.txt", startLine: 3, endLine: 2 })).isError, true)
+	assert.match((await call({ path: "text.txt", startLine: 99 })).content[0].text, /beyond end of file/)
 	await mkdir(join(dir, "folder"))
 	assert.match((await call({ path: "folder" })).content[0].text, /regular file/)
 	await writeFile(join(dir, "binary.bin"), Buffer.from([1, 0, 2]))
