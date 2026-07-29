@@ -11,7 +11,7 @@ test("三平台服务定义保留重启策略、绝对路径和安全转义", as
 		assert.match(service.content, /notionmcp\.mjs/)
 		if (kind === "macos") assert.match(service.content, /KeepAlive/)
 		if (kind === "linux") assert.match(service.content, /Restart=always/)
-		if (kind === "windows") assert.match(service.content, /LogonTrigger/)
+		if (kind === "windows") assert.match(service.content, /RestartOnFailure/)
 	}
 })
 
