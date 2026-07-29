@@ -6,7 +6,7 @@ import { getSkillsCatalog } from "./load_skills.mjs"
 export const name = "project_context"
 export const definition = {
 	name,
-	title: "读取项目上下文（只读）",
+	title: "Read Rules",
 	description: "只读地加载全局 ~/.codex/AGENTS.md、当前项目从外到内的 AGENTS.md，以及所有可用 skills 的 key、name、description。返回规则来源与 digest；开始开发任务时先调用，随后用 load_skills 的精确 key 按需读取正文。",
 	inputSchema: {
 		type: "object",

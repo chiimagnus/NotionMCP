@@ -162,7 +162,19 @@ test("现代 Streamable HTTP 探测、取消和后续请求互相隔离", async 
 
 	const initial = await modernRequest(port, MODERN_TOOLS_LIST)
 	assert.equal(initial.status, 200)
-	assert.equal(JSON.parse(initial.body).result.tools.length, 6)
+	const listedTools = JSON.parse(initial.body).result.tools
+	assert.equal(listedTools.length, 6)
+	assert.deepEqual(
+		listedTools.map(({ name, title }) => ({ name, title })),
+		[
+			{ name: "run_command", title: "Run Command" },
+			{ name: "read_image", title: "Read Image" },
+			{ name: "apply_patch", title: "Edit Files" },
+			{ name: "load_skills", title: "Load Skills" },
+			{ name: "read_file", title: "Read Text File" },
+			{ name: "project_context", title: "Read Rules" },
+		],
+	)
 	assert.equal(initial.headers["mcp-session-id"], undefined)
 	const legacyInitialize = await request(port, {
 		headers: {

@@ -84,8 +84,8 @@ export function getSkillsCatalog() {
 export const name = "load_skills"
 export const definition = {
 	name,
-	title: "加载技能",
-	description: "按 project_context 返回的精确 key 读取一个技能的完整 SKILL.md。tools/list 不会展开整个技能目录。",
+	title: "Load Skills",
+	description: "按 project_context 返回的精确 key 读取一个技能的完整 SKILL.md。",
 	inputSchema: {
 		type: "object",
 		properties: { name: { type: "string", description: "技能 key，例如 apple-docs 或 designs/screenshot。" } },

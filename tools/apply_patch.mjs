@@ -16,9 +16,9 @@ export const name = "apply_patch"
 
 export const definition = {
 	name,
-	title: "编辑文件（写入）",
+	title: "Edit Files",
 	description:
-		'写入工具：通过 operations 数组批量新建、修改或删除文件；在 Notion 中应设为“始终询问”。操作格式：create_file 使用 { type, path, content, overwrite? }；update_file 使用 { type, path, edits: [{ oldStr, newStr, replaceAll? }] }；delete_file 使用 { type, path }。完整修改示例：{"operations":[{"type":"update_file","path":"notes.txt","edits":[{"oldStr":"旧文本","newStr":"新文本"}]}]}。operations 按顺序执行，每项独立返回结果；某项失败不会回滚其他已完成项。oldStr 必须唯一匹配，除非设置 replaceAll。相对路径基于沙盒文件夹解析，也支持绝对路径——和 run_command 一样，这不是一个严格的沙盒边界。',
+		'写入工具：通过 operations 数组批量新建、修改或删除文件。操作格式：create_file 使用 { type, path, content, overwrite? }；update_file 使用 { type, path, edits: [{ oldStr, newStr, replaceAll? }] }；delete_file 使用 { type, path }。完整修改示例：{"operations":[{"type":"update_file","path":"notes.txt","edits":[{"oldStr":"旧文本","newStr":"新文本"}]}]}。operations 按顺序执行，每项独立返回结果；某项失败不会回滚其他已完成项。oldStr 必须唯一匹配，除非设置 replaceAll。相对路径基于沙盒文件夹解析，也支持绝对路径——和 run_command 一样，这不是一个严格的沙盒边界。',
 	inputSchema: {
 		type: "object",
 		properties: {

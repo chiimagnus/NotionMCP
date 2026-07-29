@@ -8,8 +8,8 @@ const MAX_BYTES = 1024 * 1024
 export const name = "read_file"
 export const definition = {
 	name,
-	title: "读取文本文件",
-	description: "只读地读取 UTF-8 普通文本文件；可指定从 startLine 到 endLine（均从 1 开始）。不执行 shell，最多返回 1 MiB。",
+	title: "Read Text File",
+	description: "只读地读取 UTF-8 普通文本文件；可指定从 startLine 到 endLine（均从 1 开始）。最多返回 1 MiB。",
 	inputSchema: {
 		type: "object",
 		properties: {

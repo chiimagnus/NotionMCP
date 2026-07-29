@@ -81,7 +81,7 @@ export const name = "run_command"
 
 export const definition = {
 	name,
-	title: "执行命令（可能写入）",
+	title: "Run Command",
 	description:
 		`在这台机器上通过 ${SHELL_LABEL} 执行一条命令。默认工作目录是 ` +
 		SANDBOX_DIR +
