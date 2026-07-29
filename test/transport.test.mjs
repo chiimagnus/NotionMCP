@@ -51,7 +51,7 @@ async function writeConfig(dir) {
 
 function request(port, { path = "/mcp", method = "POST", headers = {}, body = "" } = {}) {
 	return new Promise((resolve, reject) => {
-		const req = http.request({ host: "127.0.0.1", port, path, method, headers }, (res) => {
+		const req = http.request({ agent: false, host: "127.0.0.1", port, path, method, headers }, (res) => {
 			const chunks = []
 			res.on("data", (chunk) => chunks.push(chunk))
 			res.once("end", () =>
@@ -501,6 +501,50 @@ test("SSE 总容量只拒绝新流，不关闭既有 Streamable 或旧 SSE 连�
 	assert.equal(health.connections.legacySse, 1)
 	assert.equal(health.sseHighWater, 256)
 	assert.equal((await modernRequest(port, MODERN_TOOLS_LIST)).status, 200)
+})
+
+test("持有 SSE 时两轮十二条命令跨过并发阈值后恢复", async (t) => {
+	const { module, dir } = await getFixture()
+	const lifecycle = module.createMcpHttpServer({ port: 0, token: TOKEN })
+	t.after(() => lifecycle.shutdown())
+	const { port } = await lifecycle.listen()
+	const streams = []
+	for (let index = 0; index < 32; index += 1) streams.push(await openStreamableSse(port))
+	t.after(() => streams.forEach((stream) => stream.close()))
+	const helper = join(dir, "concurrency-delay.cjs")
+	await writeFile(helper, `setTimeout(()=>process.stdout.write(process.argv[2]),300)\n`)
+	const command = (id) =>
+		modernRequest(
+			port,
+			{
+				jsonrpc: "2.0",
+				id,
+				method: "tools/call",
+				params: {
+					name: "run_command",
+					arguments: { command: nodeCommand(process.execPath, helper, id) },
+					_meta: MODERN_TOOLS_LIST.params._meta,
+				},
+			},
+			{ "Mcp-Name": "run_command" },
+		)
+	for (const start of [100, 200]) {
+		const batch = Array.from({ length: 12 }, (_, index) => command(start + index))
+		await waitFor(
+			() => lifecycle.activeRequestCount === 10 && lifecycle.queuedRequestCount === 2,
+			"twelve commands did not cross the shared execution limit",
+		)
+		assert.ok((await Promise.all(batch)).every((response) => response.status === 200))
+		const health = JSON.parse((await request(port, { path: "/healthz", method: "GET" })).body)
+		assert.equal(health.activeRequests, 0)
+		assert.equal(health.queuedRequests, 0)
+		assert.equal(health.connections.streamableSse, 32)
+	}
+	streams.forEach((stream) => stream.close())
+	await waitFor(
+		() => lifecycle.streamableSseCount === 0 && lifecycle.activeRequestCount === 0 && lifecycle.queuedRequestCount === 0 && lifecycle.connectionCount === 0,
+		"combined stress test leaked an SSE stream, request, or socket",
+	)
 })
 
 test("旧 SSE message 与现代 POST 共享 FIFO 背压", async (t) => {
