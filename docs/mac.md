@@ -30,7 +30,7 @@ security find-generic-password -a "$USER" -s mcp-token -w
 
 第一次读取时在钥匙串弹窗中选择「始终允许」。Token 不要写进仓库、Notion 页面或聊天记录。
 
-## 启动
+## 启动与常驻
 
 ```bash
 npm install
@@ -38,7 +38,15 @@ chmod +x ./up.sh
 ./up.sh
 ```
 
-保持终端运行，按 `Control+C` 正常停止。服务只监听 `127.0.0.1:8000`；Tailscale Funnel 对外提供 `/mcp`。修改 `.env` 或增删 skill 后需要重启。
+前台运行时按 `Control+C` 正常停止。服务只监听 `127.0.0.1:8000`；Funnel 只公开 `/mcp`。修改 `.env` 后重启。
+
+安装为当前用户的 launchd 服务（先检查输出，不写任何系统状态）：
+
+```bash
+node bin/notionmcp.mjs install --dry-run
+node bin/notionmcp.mjs install
+node bin/notionmcp.mjs uninstall
+```
 
 Notion 中选择 **Add connection → Custom MCP server**：
 
@@ -48,4 +56,4 @@ Notion 中选择 **Add connection → Custom MCP server**：
 | 鉴权方式 | Bearer Token |
 | Token | 钥匙串中的裸值 |
 
-默认启动器独占本设备 Funnel 配置，正常关闭会 reset 本设备的所有 Funnel route。需要共享 route 时请自行编排。异常断电后若 route 残留，运行 `tailscale funnel reset`。
+启动器只管理 `/mcp`；不会 `tailscale funnel reset`，也不会删除其他 route。旧版本项目根路由仅在目标精确匹配本机端口时迁移。排障见 [operations.md](./operations.md)。
