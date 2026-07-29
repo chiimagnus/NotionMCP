@@ -20,6 +20,16 @@ const MODERN_TOOLS_LIST = {
 		},
 	},
 }
+const MODERN_LOAD_SKILL = {
+	jsonrpc: "2.0",
+	id: 3,
+	method: "tools/call",
+	params: {
+		name: "load_skills",
+		arguments: { name: "fixture-skill" },
+		_meta: MODERN_TOOLS_LIST.params._meta,
+	},
+}
 
 async function writeConfig(dir) {
 	const config = join(dir, ".env")
@@ -173,10 +183,30 @@ test("2026 Streamable HTTP 校验元数据且不破坏旧版 JSON 响应", async
 	assert.equal(current.status, 200)
 	assert.match(current.headers["content-type"], /^application\/json/)
 	assert.equal(JSON.parse(current.body).result.tools.length, 4)
+	const called = await modernRequest(port, MODERN_LOAD_SKILL, { "Mcp-Name": "load_skills" })
+	assert.equal(called.status, 200)
+	assert.match(JSON.parse(called.body).result.content[0].text, /fixture-skill/)
 
 	const mismatchedMethod = await modernRequest(port, MODERN_TOOLS_LIST, { "Mcp-Method": "tools/call" })
 	assert.equal(mismatchedMethod.status, 400)
 	assert.equal(JSON.parse(mismatchedMethod.body).error.code, -32020)
+	const mismatchedName = await modernRequest(port, MODERN_LOAD_SKILL, { "Mcp-Name": "run_command" })
+	assert.equal(mismatchedName.status, 400)
+	assert.equal(JSON.parse(mismatchedName.body).error.code, -32020)
+
+	const unsupportedVersion = await modernRequest(
+		port,
+		{
+			...MODERN_TOOLS_LIST,
+			params: {
+				...MODERN_TOOLS_LIST.params,
+				_meta: { ...MODERN_TOOLS_LIST.params._meta, "io.modelcontextprotocol/protocolVersion": "2099-01-01" },
+			},
+		},
+		{ "Mcp-Protocol-Version": "2099-01-01" },
+	)
+	assert.equal(unsupportedVersion.status, 400)
+	assert.equal(typeof JSON.parse(unsupportedVersion.body).error.code, "number")
 
 	const invalidOrigin = await modernRequest(port, MODERN_TOOLS_LIST, { Origin: "https://attacker.example" })
 	assert.equal(invalidOrigin.status, 403)
