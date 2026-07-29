@@ -3,7 +3,7 @@ import { formatAgentsMdContext, getAgentsMdContext, markAgentsMdContextDelivered
 import { resolvePath } from "../lib/paths.mjs"
 import { getSkillsCatalog } from "./load_skills.mjs"
 
-export const name = "project_context"
+export const name = "read_rules"
 export const definition = {
 	name,
 	title: "Read Rules",

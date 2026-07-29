@@ -30,9 +30,9 @@ node bin/notionmcp.mjs install --dry-run
 
 不用把 URL 改成 `/sse`：Notion 将该 URL 作为旧 SSE 入口发起 `GET` 时，服务会自动切换到兼容 transport；现代客户端继续以 `POST /mcp` 使用 Streamable HTTP。
 
-- 设为“自动运行”：`project_context`、`load_skills`、`read_file`、`read_image`。
+- 设为“自动运行”：`read_rules`、`load_skills`、`read_file`、`read_image`。
 - 设为“始终询问”：`run_command`、`apply_patch`。前者可以执行任意命令，后者会修改文件；不要选择服务器级的永久允许。
 
 Notion 官方将 read 工具建议为自动运行、write 工具建议为每次确认；也支持在连接内逐个开关工具。[官方连接与审批说明](https://www.notion.com/help/mcp-connections-for-custom-agents)
 
-推荐给 Agent 的工作顺序：`project_context`（规则与所有 skills 摘要）→ （需要时）`load_skills` → `read_file`/`read_image` → `run_command` 诊断 → `apply_patch` 修改 → `run_command` 验证。规则或 skills 的正文只会在相应读取工具结果中出现。
+推荐给 Agent 的工作顺序：`read_rules`（规则与所有 skills 摘要）→ （需要时）`load_skills` → `read_file`/`read_image` → `run_command` 诊断 → `apply_patch` 修改 → `run_command` 验证。规则或 skills 的正文只会在相应读取工具结果中出现。

@@ -172,7 +172,7 @@ test("现代 Streamable HTTP 探测、取消和后续请求互相隔离", async 
 			{ name: "apply_patch", title: "Edit Files" },
 			{ name: "load_skills", title: "Load Skills" },
 			{ name: "read_file", title: "Read Text File" },
-			{ name: "project_context", title: "Read Rules" },
+			{ name: "read_rules", title: "Read Rules" },
 		],
 	)
 	assert.equal(initial.headers["mcp-session-id"], undefined)
@@ -202,7 +202,7 @@ test("现代 Streamable HTTP 探测、取消和后续请求互相隔离", async 
 		body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} }),
 	})
 	assert.equal(legacyToolsList.status, 200)
-	assert.match(legacyToolsList.body, /"name":"project_context"/)
+	assert.match(legacyToolsList.body, /"name":"read_rules"/)
 
 	const wrongMethod = await request(port, { method: "PUT" })
 	assert.equal(wrongMethod.status, 405)

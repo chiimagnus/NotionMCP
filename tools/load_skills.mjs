@@ -85,7 +85,7 @@ export const name = "load_skills"
 export const definition = {
 	name,
 	title: "Load Skills",
-	description: "按 project_context 返回的精确 key 读取一个技能的完整 SKILL.md。",
+	description: "按 read_rules 返回的精确 key 读取一个技能的完整 SKILL.md。",
 	inputSchema: {
 		type: "object",
 		properties: { name: { type: "string", description: "技能 key，例如 apple-docs 或 designs/screenshot。" } },
@@ -103,7 +103,7 @@ export async function call(args, { signal } = {}) {
 	if (!key || typeof key !== "string") return failure("Missing required name string", "invalid_input")
 	if (signal?.aborted) return failure("Skill read cancelled", "cancelled")
 	const skill = getSkillsCatalog().find((entry) => entry.key === key)
-	if (!skill) return failure(`Skill not found: ${key}. Call project_context to refresh the catalog.`, "not_found")
+	if (!skill) return failure(`Skill not found: ${key}. Call read_rules to refresh the catalog.`, "not_found")
 	try {
 		const info = statSync(skill.file)
 		if (info.size > MAX_SKILL_BYTES) return failure(`Skill exceeds ${MAX_SKILL_BYTES} byte limit`, "too_large")

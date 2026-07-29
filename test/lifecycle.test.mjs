@@ -1054,7 +1054,7 @@ test("六个工具均经真实 HTTP 到达", async (t) => {
 		}, 22),
 		toolCall("load_skills", { name: "fixture-skill" }, 23),
 		toolCall("read_file", { path: patched }, 24),
-		toolCall("project_context", { cwd: httpFixture.dir }, 25),
+		toolCall("read_rules", { cwd: httpFixture.dir }, 25),
 	]
 	const responses = []
 	for (const call of calls) responses.push(await mcpRequest(port, token, call))
