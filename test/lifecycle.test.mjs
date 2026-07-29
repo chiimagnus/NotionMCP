@@ -647,6 +647,53 @@ async function assertHttpHealthy(lifecycle, port, token) {
 	assert.equal(lifecycle.activeRequestCount, 0)
 }
 
+test("healthz 仅接受直连 loopback，并给每个 MCP 请求留下脱敏 trace", async (t) => {
+	const { lifecycle, port, token } = await startMcpServer(t)
+
+	const health = await httpRequest(port, { path: "/healthz", method: "GET" })
+	assert.equal(health.status, 200)
+	assert.equal(health.headers["cache-control"], "no-store")
+	assert.deepEqual(
+		JSON.parse(health.body),
+		{
+			status: "ready",
+			version: "2.0.0",
+			uptimeMs: JSON.parse(health.body).uptimeMs,
+			activeRequests: 0,
+			maxActiveRequests: 10,
+			checks: { listener: "ready", acceptingRequests: "ready" },
+		},
+	)
+	assert.equal((await httpRequest(port, { path: "/healthz", method: "GET", headers: { "X-Forwarded-For": "203.0.113.1" } })).status, 403)
+
+	const completed = await mcpRequest(port, token, TOOLS_LIST)
+	assert.equal(completed.status, 200)
+	const completedTrace = completed.headers["x-request-id"]
+	assert.match(completedTrace, /^[0-9a-f]{8}-[0-9a-f-]{27}$/)
+
+	const bodyMarker = "TRACE_BODY_MUST_NOT_BE_LOGGED"
+	const rejected = await httpRequest(port, {
+		headers: { Authorization: "Bearer wrong", Accept: "application/json, text/event-stream", "Content-Type": "application/json" },
+		body: JSON.stringify({ marker: bodyMarker }),
+	})
+	assert.equal(rejected.status, 401)
+	const rejectedTrace = rejected.headers["x-request-id"]
+	assert.notEqual(rejectedTrace, completedTrace)
+
+	const records = (await readFile(join(httpFixture.dir, "http.log"), "utf8")).trimEnd().split("\n").map(JSON.parse)
+	assert.deepEqual(
+		records.filter((record) => record.traceId === completedTrace).map((record) => record.event),
+		["received", "authenticated", "queued", "started", "completed"],
+	)
+	assert.deepEqual(
+		records.filter((record) => record.traceId === rejectedTrace).map((record) => record.event),
+		["received", "rejected"],
+	)
+	assert.doesNotMatch(JSON.stringify(records), new RegExp(bodyMarker))
+	assert.doesNotMatch(JSON.stringify(records), /Bearer wrong/)
+	assert.equal(lifecycle.activeRequestCount, 0)
+})
+
 function toolCall(name, args, id = 1) {
 	return { jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: args } }
 }
