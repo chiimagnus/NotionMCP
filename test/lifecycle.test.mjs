@@ -338,7 +338,7 @@ test("read_image 只读取普通文件并对输入输出施加 10 MiB 上限", a
 	const config = await configFile(dir)
 	const small = join(dir, "small.png")
 	await writeFile(small, Buffer.from([0x89, 0x50, 0x4e, 0x47]))
-	const ok = await runImageTool(config, { path: small })
+	const ok = await runImageTool(config, { path: small, detail: "original" })
 	assert.equal(ok.result.content[0].mimeType, "image/png")
 	assert.equal(ok.result.content[0].data, Buffer.from([0x89, 0x50, 0x4e, 0x47]).toString("base64"))
 
