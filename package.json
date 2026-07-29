@@ -9,9 +9,9 @@
 	},
 	"scripts": {
 		"start": "node lib/up.mjs",
-		"test": "node --test test/lifecycle.test.mjs test/transport.test.mjs",
+		"test": "node --test test/lifecycle.test.mjs test/transport.test.mjs test/service-manager.test.mjs",
 		"test:soak": "node --expose-gc test/soak.mjs",
-		"build": "node --check lib/up.mjs && node --check lib/mcp-http.mjs"
+		"build": "node --check lib/up.mjs && node --check lib/mcp-http.mjs && node --check lib/service-manager.mjs && node --check lib/tailscale.mjs"
 	},
 	"dependencies": {
 		"@modelcontextprotocol/sdk": "^1.30.0",
