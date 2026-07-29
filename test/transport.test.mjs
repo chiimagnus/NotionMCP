@@ -434,6 +434,49 @@ test("旧 HTTP+SSE 保留 Notion 打开的全部会话", async (t) => {
 	)
 })
 
+test("同一旧 SSE 会话的并发工具调用进入共享 FIFO", async (t) => {
+	const { module, dir } = await getFixture()
+	const lifecycle = module.createMcpHttpServer({ port: 0, token: TOKEN })
+	t.after(() => lifecycle.shutdown())
+	const { port } = await lifecycle.listen()
+	const sse = await openSse(port)
+	t.after(sse.close)
+	const headers = { Authorization: `Bearer ${TOKEN}`, "Content-Type": "application/json" }
+	assert.equal(
+		(
+			await request(port, {
+				path: sse.endpoint,
+				headers,
+				body: JSON.stringify({
+					jsonrpc: "2.0",
+					id: 1,
+					method: "initialize",
+					params: { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "notion-sse", version: "1.0" } },
+				}),
+			})
+		).status,
+		202,
+	)
+	await waitFor(() => sse.messages.some((message) => message.id === 1), "SSE initialize response did not arrive")
+	const helper = join(dir, "legacy-delay.cjs")
+	await writeFile(helper, `setTimeout(()=>process.stdout.write("done"),100)\n`)
+	const calls = [2, 3].map((id) =>
+		request(port, {
+			path: sse.endpoint,
+			headers,
+			body: JSON.stringify({
+				jsonrpc: "2.0",
+				id,
+				method: "tools/call",
+				params: { name: "run_command", arguments: { command: nodeCommand(process.execPath, helper) } },
+			}),
+		}),
+	)
+	assert.ok((await Promise.all(calls)).every((response) => response.status === 202))
+	await waitFor(() => [2, 3].every((id) => sse.messages.some((message) => message.id === id)), "concurrent SSE responses did not arrive")
+	for (const id of [2, 3]) assert.notEqual(sse.messages.find((message) => message.id === id).result.isError, true)
+})
+
 test("SSE 总容量只拒绝新流，不关闭既有 Streamable 或旧 SSE 连接", async (t) => {
 	const { module } = await getFixture()
 	const lifecycle = module.createMcpHttpServer({ port: 0, token: TOKEN })
