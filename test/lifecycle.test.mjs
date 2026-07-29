@@ -930,7 +930,7 @@ test("JSON-RPC 和协议版本错误互不污染后续请求", async (t) => {
 	await assertHttpHealthy(lifecycle, port, token)
 })
 
-test("四个长请求占满 slot，第五个和 batch 都不能启动命令", async (t) => {
+test("十个长请求占满 slot，第十一个和 batch 都不能启动命令", async (t) => {
 	const { lifecycle, port, token } = await startMcpServer(t)
 	const helper = join(httpFixture.dir, "http-tree.cjs")
 	await writeFile(
@@ -939,7 +939,7 @@ test("四个长请求占满 slot，第五个和 batch 都不能启动命令", as
 	)
 	const requests = []
 	const pids = []
-	for (let i = 0; i < 4; i += 1) {
+	for (let i = 0; i < 10; i += 1) {
 		const parentFile = join(httpFixture.dir, `http-parent-${i}.pid`)
 		const grandFile = join(httpFixture.dir, `http-grand-${i}.pid`)
 		const pending = openMcpRequest(port, token, toolCall("run_command", {
@@ -949,19 +949,19 @@ test("四个长请求占满 slot，第五个和 batch 都不能启动命令", as
 		requests.push({ ...pending, settled: pending.response.catch(() => null) })
 		pids.push(await waitForPid(parentFile), await waitForPid(grandFile))
 	}
-	assert.equal(lifecycle.activeRequestCount, 4)
+	assert.equal(lifecycle.activeRequestCount, 10)
 
-	const marker = join(httpFixture.dir, "fifth-marker")
+	const marker = join(httpFixture.dir, "eleventh-marker")
 	const markerCommand = nodeCommand(join(httpFixture.dir, "write-marker.cjs"), marker)
 	await writeFile(join(httpFixture.dir, "write-marker.cjs"), `require("node:fs").writeFileSync(process.argv[2],"ran")\n`)
-	const fifthBody = JSON.stringify(toolCall("run_command", { command: markerCommand }, 10))
-	const fifth = await headersOnlyRequest(port, {
+	const eleventhBody = JSON.stringify(toolCall("run_command", { command: markerCommand }, 11))
+	const eleventh = await headersOnlyRequest(port, {
 		Authorization: `Bearer ${token}`,
 		Accept: "application/json, text/event-stream",
 		"Content-Type": "application/json",
-		"Content-Length": String(Buffer.byteLength(fifthBody)),
+		"Content-Length": String(Buffer.byteLength(eleventhBody)),
 	})
-	assert.equal(fifth.status, 429)
+	assert.equal(eleventh.status, 429)
 	await assert.rejects(readFile(marker))
 
 	for (const request of requests) request.req.destroy()
@@ -975,7 +975,7 @@ test("四个长请求占满 slot，第五个和 batch 都不能启动命令", as
 	])
 	assert.equal(batch.status, 400)
 	await assert.rejects(readFile(marker))
-	const recovered = await Promise.all(Array.from({ length: 4 }, () => mcpRequest(port, token, TOOLS_LIST)))
+	const recovered = await Promise.all(Array.from({ length: 10 }, () => mcpRequest(port, token, TOOLS_LIST)))
 	assert.ok(recovered.every((response) => response.status === 200))
 	assert.equal(lifecycle.activeRequestCount, 0)
 })
@@ -1170,7 +1170,7 @@ test("500 个无状态请求不累积进程、Session 或 active context", async
 	}
 	assert.equal(lifecycle.activeRequestCount, 0)
 	assert.equal(repositoryNodeProcessCount(), baselineProcesses)
-	const concurrent = await Promise.all(Array.from({ length: 4 }, () => mcpRequest(port, token, TOOLS_LIST)))
+	const concurrent = await Promise.all(Array.from({ length: 10 }, () => mcpRequest(port, token, TOOLS_LIST)))
 	assert.ok(concurrent.every((response) => response.status === 200))
 	assert.equal(lifecycle.activeRequestCount, 0)
 })

@@ -197,7 +197,7 @@ async function bindAndClose(port) {
 if (typeof global.gc !== "function") throw new Error("soak 必须通过 node --expose-gc 运行")
 
 const temp = await mkdtemp(join(tmpdir(), "notionmcp-soak-"))
-const agent = new http.Agent({ keepAlive: true, maxSockets: 8 })
+const agent = new http.Agent({ keepAlive: true, maxSockets: 12 })
 const openRequests = []
 let lifecycle
 let port
@@ -254,7 +254,7 @@ try {
 		`const{spawn}=require("node:child_process");const{writeFileSync}=require("node:fs");if(process.argv[2]==="grand"){writeFileSync(process.argv[3],String(process.pid));setInterval(()=>{},1000)}else{writeFileSync(process.argv[2],String(process.ppid));writeFileSync(process.argv[3],String(process.pid));spawn(process.execPath,[__filename,"grand",process.argv[4]],{stdio:"ignore"});setInterval(()=>{},1000)}\n`,
 	)
 	const pids = []
-	for (let i = 0; i < 4; i += 1) {
+	for (let i = 0; i < 10; i += 1) {
 		const shellFile = join(temp, `shell-${i}.pid`)
 		const parentFile = join(temp, `parent-${i}.pid`)
 		const grandFile = join(temp, `grand-${i}.pid`)
@@ -277,13 +277,13 @@ try {
 			await waitForPid(grandFile),
 		)
 	}
-	const fifthBody = JSON.stringify({
+	const eleventhBody = JSON.stringify({
 		jsonrpc: "2.0",
-		id: 20,
+		id: 30,
 		method: "tools/call",
 		params: { name: "run_command", arguments: { command: "unused" } },
 	})
-	assert.equal(await headersOnlyRequest(port, agent, Buffer.byteLength(fifthBody)), 429)
+	assert.equal(await headersOnlyRequest(port, agent, Buffer.byteLength(eleventhBody)), 429)
 	for (const pending of openRequests) pending.req.destroy()
 	await Promise.all(openRequests.map((pending) => pending.settled))
 	await waitForDead(pids)
