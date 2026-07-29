@@ -675,6 +675,8 @@ test("healthz 仅接受直连 loopback，并给每个 MCP 请求留下脱敏 tra
 			uptimeMs: JSON.parse(health.body).uptimeMs,
 			activeRequests: 0,
 			maxActiveRequests: 10,
+			queuedRequests: 0,
+			maxQueuedRequests: 64,
 			connections: { open: 1, legacySse: 0 },
 			checks: { listener: "ready", acceptingRequests: "ready" },
 		},
@@ -983,7 +985,7 @@ test("JSON-RPC 和协议版本错误互不污染后续请求", async (t) => {
 	await assertHttpHealthy(lifecycle, port, token)
 })
 
-test("十个长请求占满 slot，第十一个和 batch 都不能启动命令", async (t) => {
+test("十个长请求占满 slot 后，排队请求取消不会执行命令", async (t) => {
 	const { lifecycle, port, token } = await startMcpServer(t)
 	const logFile = join(httpFixture.dir, "http.log")
 	const traceOffset = (await readFile(logFile, "utf8").catch(() => "")).length
@@ -1009,14 +1011,26 @@ test("十个长请求占满 slot，第十一个和 batch 都不能启动命令",
 	const marker = join(httpFixture.dir, "eleventh-marker")
 	const markerCommand = nodeCommand(join(httpFixture.dir, "write-marker.cjs"), marker)
 	await writeFile(join(httpFixture.dir, "write-marker.cjs"), `require("node:fs").writeFileSync(process.argv[2],"ran")\n`)
-	const eleventhBody = JSON.stringify(toolCall("run_command", { command: markerCommand }, 11))
-	const eleventh = await headersOnlyRequest(port, {
-		Authorization: `Bearer ${token}`,
-		Accept: "application/json, text/event-stream",
-		"Content-Type": "application/json",
-		"Content-Length": String(Buffer.byteLength(eleventhBody)),
-	})
-	assert.equal(eleventh.status, 429)
+	const eleventh = openMcpRequest(port, token, toolCall("run_command", { command: markerCommand }, 11))
+	await waitForCondition(() => lifecycle.queuedRequestCount === 1, "第十一个请求没有进入队列")
+	const underLoad = JSON.parse((await httpRequest(port, { path: "/healthz", method: "GET" })).body)
+	assert.equal(underLoad.activeRequests, 10)
+	assert.equal(underLoad.queuedRequests, 1)
+	eleventh.req.destroy()
+	await eleventh.response.catch(() => null)
+	await waitForCondition(() => lifecycle.queuedRequestCount === 0, "取消的排队请求没有离开队列")
+	await assert.rejects(readFile(marker))
+
+	const queued = Array.from({ length: 64 }, (_, index) =>
+		openMcpRequest(port, token, toolCall("run_command", { command: markerCommand }, index + 20)),
+	)
+	await waitForCondition(() => lifecycle.queuedRequestCount === 64, "64 个等待位没有全部占满")
+	const overflow = await mcpRequest(port, token, toolCall("run_command", { command: markerCommand }, 99))
+	assert.equal(overflow.status, 429)
+	assert.equal(overflow.headers["retry-after"], "1")
+	for (const request of queued) request.req.destroy()
+	await Promise.all(queued.map((request) => request.response.catch(() => null)))
+	await waitForCondition(() => lifecycle.queuedRequestCount === 0, "过载测试的等待请求没有清理")
 	await assert.rejects(readFile(marker))
 
 	for (const request of requests) request.req.destroy()
@@ -1042,6 +1056,27 @@ test("十个长请求占满 slot，第十一个和 batch 都不能启动命令",
 	assert.ok(events.rejected >= 1)
 	assert.ok(events.completed >= 10)
 	assert.equal(events.failed || 0, 0)
+})
+
+test("二十四条并发工具调用经 FIFO 背压全部完成", async (t) => {
+	const { lifecycle, port, token } = await startMcpServer(t)
+	const helper = join(httpFixture.dir, "queue-delay.cjs")
+	await writeFile(helper, `setTimeout(()=>process.stdout.write("done"),500)\n`)
+	const requests = Array.from({ length: 24 }, (_, index) =>
+		mcpRequest(port, token, toolCall("run_command", { command: nodeCommand(helper) }, index + 1)),
+	)
+	await waitForCondition(
+		() => lifecycle.activeRequestCount === 10 && lifecycle.queuedRequestCount === 14,
+		"24 个请求没有形成预期的 10 运行 + 14 排队状态",
+	)
+	const underLoad = JSON.parse((await httpRequest(port, { path: "/healthz", method: "GET" })).body)
+	assert.equal(underLoad.activeRequests, 10)
+	assert.equal(underLoad.queuedRequests, 14)
+	assert.equal(underLoad.maxQueuedRequests, 64)
+	const responses = await Promise.all(requests)
+	assert.ok(responses.every((response) => response.status === 200))
+	assert.equal(lifecycle.activeRequestCount, 0)
+	assert.equal(lifecycle.queuedRequestCount, 0)
 })
 
 test("六个工具均经真实 HTTP 到达", async (t) => {

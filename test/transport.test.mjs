@@ -118,6 +118,10 @@ function modernRequest(port, message, headers = {}) {
 	})
 }
 
+function nodeCommand(...args) {
+	return args.map((arg) => JSON.stringify(String(arg))).join(" ")
+}
+
 async function waitFor(predicate, description) {
 	const deadline = Date.now() + 2_000
 	while (Date.now() < deadline) {
@@ -375,4 +379,71 @@ test("旧 HTTP+SSE 保留 Notion 打开的全部会话", async (t) => {
 		).status,
 		202,
 	)
+})
+
+test("旧 SSE message 与现代 POST 共享 FIFO 背压", async (t) => {
+	const { module, dir } = await getFixture()
+	const lifecycle = module.createMcpHttpServer({ port: 0, token: TOKEN })
+	t.after(() => lifecycle.shutdown())
+	const { port } = await lifecycle.listen()
+	const sse = await openSse(port)
+	t.after(sse.close)
+	const headers = { Authorization: `Bearer ${TOKEN}`, "Content-Type": "application/json" }
+	assert.equal(
+		(
+			await request(port, {
+				path: sse.endpoint,
+				headers,
+				body: JSON.stringify({
+					jsonrpc: "2.0",
+					id: 1,
+					method: "initialize",
+					params: { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "notion-sse", version: "1.0" } },
+				}),
+			})
+		).status,
+		202,
+	)
+	await waitFor(() => sse.messages.some((message) => message.id === 1), "SSE initialize response did not arrive")
+	assert.equal(
+		(
+			await request(port, {
+				path: sse.endpoint,
+				headers,
+				body: JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized", params: {} }),
+			})
+		).status,
+		202,
+	)
+
+	const helper = join(dir, "queue-delay.cjs")
+	await writeFile(helper, `setTimeout(()=>process.stdout.write("done"),500)\n`)
+	const active = Array.from({ length: 10 }, (_, index) =>
+		modernRequest(
+			port,
+			{
+				jsonrpc: "2.0",
+				id: index + 10,
+				method: "tools/call",
+				params: {
+					name: "run_command",
+					arguments: { command: nodeCommand(process.execPath, helper) },
+					_meta: MODERN_TOOLS_LIST.params._meta,
+				},
+			},
+			{ "Mcp-Name": "run_command" },
+		),
+	)
+	await waitFor(() => lifecycle.activeRequestCount === 10, "modern requests did not fill execution slots")
+	const legacy = request(port, {
+		path: sse.endpoint,
+		headers,
+		body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} }),
+	})
+	await waitFor(() => lifecycle.queuedRequestCount === 1, "legacy message did not enter the shared queue")
+	assert.equal(JSON.parse((await request(port, { path: "/healthz", method: "GET" })).body).queuedRequests, 1)
+	assert.ok((await Promise.all(active)).every((response) => response.status === 200))
+	assert.equal((await legacy).status, 202)
+	await waitFor(() => sse.messages.some((message) => message.id === 2), "queued SSE tools/list response did not arrive")
+	assert.equal(lifecycle.queuedRequestCount, 0)
 })
