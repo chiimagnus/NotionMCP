@@ -642,7 +642,7 @@ const TOOLS_LIST = { jsonrpc: "2.0", id: 99, method: "tools/list", params: {} }
 async function assertHttpHealthy(lifecycle, port, token) {
 	const response = await mcpRequest(port, token, TOOLS_LIST)
 	assert.equal(response.status, 200)
-	assert.equal(JSON.parse(response.body).result.tools.length, 4)
+	assert.equal(JSON.parse(response.body).result.tools.length, 5)
 	assert.equal(response.headers["mcp-session-id"], undefined)
 	assert.equal(lifecycle.activeRequestCount, 0)
 }
@@ -802,7 +802,7 @@ test("原生无状态 HTTP 完成基础 MCP 协议且可确定关闭", async (t)
 	assert.equal(JSON.parse(responses[0].body).result.serverInfo.name, "notionmcp")
 	assert.equal(responses[1].status, 202)
 	assert.equal(JSON.parse(responses[2].body).result !== undefined, true)
-	assert.equal(JSON.parse(responses[3].body).result.tools.length, 4)
+	assert.equal(JSON.parse(responses[3].body).result.tools.length, 5)
 	assert.equal(JSON.parse(responses[4].body).error.code, -32602)
 	assert.equal(lifecycle.activeRequestCount, 0)
 
@@ -1038,7 +1038,7 @@ test("十个长请求占满 slot，第十一个和 batch 都不能启动命令",
 	assert.equal(events.failed || 0, 0)
 })
 
-test("四个工具均经真实 HTTP 到达，apply_patch 在取消边界停止后续写入", async (t) => {
+test("五个工具均经真实 HTTP 到达，apply_patch 在取消边界停止后续写入", async (t) => {
 	const { lifecycle, port, token } = await startMcpServer(t)
 	const commandHelper = join(httpFixture.dir, "http-output.cjs")
 	await writeFile(commandHelper, `process.stdout.write("via-http")\n`)
