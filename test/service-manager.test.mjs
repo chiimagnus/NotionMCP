@@ -52,10 +52,9 @@ test("Tailscale 状态区分正常、未登录、缺失、错误目标和超时"
 	}
 })
 
-test("Funnel 只迁移本项目旧根路由，并精确关闭 /mcp", async () => {
+test("Funnel 只配置并精确关闭 /mcp", async () => {
 	const runner = fakeRunner([
 		status({ path: "/", target: TARGET }),
-		{ status: 0, stdout: "", stderr: "" },
 		{ status: 0, stdout: "", stderr: "" },
 		{ status: 0, stdout: "", stderr: "" },
 	])
@@ -64,11 +63,10 @@ test("Funnel 只迁移本项目旧根路由，并精确关闭 /mcp", async () =>
 	assert.equal(configured.changed, true)
 	assert.deepEqual(runner.calls.map((call) => call.args), [
 		["funnel", "status", "--json"],
-		["funnel", "--set-path=/", "off"],
 		["funnel", "--bg", "--set-path=/mcp", TARGET],
 	])
 	await manager.disableMcpFunnel()
-	assert.deepEqual(runner.calls[3].args, ["funnel", "--set-path=/mcp", "off"])
+	assert.deepEqual(runner.calls[2].args, ["funnel", "--set-path=/mcp", "off"])
 })
 
 test("已正确配置不改 Funnel；错误目标中止且不覆盖用户配置", async () => {
