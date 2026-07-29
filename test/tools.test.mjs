@@ -59,10 +59,6 @@ test("read_file 只读 UTF-8 普通文件，并校验范围、大小、二进制
 	const hierarchy = await agents.getAgentsMdContext(nested, { globalFile })
 	assert.deepEqual(hierarchy.sources.map((source) => source.content), ["global rule", "outer rule", "inner rule"])
 	assert.match(agents.formatAgentsMdContext(hierarchy), /digest: sha256:/)
-	assert.match(await agents.getChangedAgentsMdBlock(nested, { globalFile }), /inner rule/)
-	assert.equal(await agents.getChangedAgentsMdBlock(nested, { globalFile }), "")
-	await writeFile(join(nested, "AGENTS.md"), "inner rule changed")
-	assert.match(await agents.getChangedAgentsMdBlock(nested, { globalFile }), /inner rule changed/)
 	await mkdir(join(rulesRoot, "invalid"), { recursive: true })
 	await writeFile(join(rulesRoot, "invalid", "AGENTS.md"), Buffer.from([0xc3, 0x28]))
 	const invalid = await agents.getAgentsMdContext(join(rulesRoot, "invalid"), { globalFile })
@@ -77,14 +73,20 @@ test("read_file 只读 UTF-8 普通文件，并校验范围、大小、二进制
 
 	const readRules = await import(`../tools/read_rules.mjs?test=${Date.now()}-${Math.random()}`)
 	assert.equal((await readRules.call({ cwd: 1 })).isError, true)
-	assert.match((await readRules.call({ cwd: nested })).content[0].text, /inner rule changed/)
+	assert.match((await readRules.call({ cwd: nested })).content[0].text, /inner rule/)
 	const runCommand = await import(`../tools/run_command.mjs?test=${Date.now()}-${Math.random()}`)
+	const applyPatch = await import(`../tools/apply_patch.mjs?test=${Date.now()}-${Math.random()}`)
 	assert.equal((await runCommand.call({ command: "printf context", cwd: 1 })).isError, true)
-	assert.doesNotMatch((await runCommand.call({ command: "printf context", cwd: nested })).content[0].text, /auto-loaded dev conventions/)
-	await writeFile(join(nested, "AGENTS.md"), "inner rule changed again")
-	assert.match((await runCommand.call({ command: "printf context", cwd: nested })).content[0].text, /inner rule changed again/)
-	assert.doesNotMatch((await runCommand.call({ command: "printf context", cwd: nested })).content[0].text, /auto-loaded dev conventions/)
-	assert.doesNotMatch(await readFile(join(dir, "mcp.log"), "utf8"), /inner rule changed again/)
+	await writeFile(join(nested, "AGENTS.md"), "RULE_AUTO_APPLY_PATCH_MUST_NOT_APPEAR")
+	const patchedWithoutRules = await applyPatch.call({
+		operations: [{ type: "create_file", path: join(nested, "apply-patch-proof.txt"), content: "proof" }],
+	})
+	assert.doesNotMatch(patchedWithoutRules.content[0].text, /RULE_AUTO_APPLY_PATCH_MUST_NOT_APPEAR/)
+	await writeFile(join(nested, "AGENTS.md"), "RULE_AUTO_RUN_COMMAND_MUST_NOT_APPEAR")
+	const commandWithoutRules = await runCommand.call({ command: "printf context", cwd: nested })
+	assert.doesNotMatch(commandWithoutRules.content[0].text, /RULE_AUTO_RUN_COMMAND_MUST_NOT_APPEAR/)
+	assert.match((await readRules.call({ cwd: nested })).content[0].text, /RULE_AUTO_RUN_COMMAND_MUST_NOT_APPEAR/)
+	assert.doesNotMatch(await readFile(join(dir, "mcp.log"), "utf8"), /RULE_AUTO_RUN_COMMAND_MUST_NOT_APPEAR/)
 
 	const alpha = join(dir, "skills", "alpha")
 	const beta = join(dir, "skills", "nested", "beta")
@@ -96,7 +98,6 @@ test("read_file 只读 UTF-8 普通文件，并校验范围、大小、二进制
 	const registry = await import("../tools/index.mjs")
 	assert.doesNotMatch(loadSkills.definition.description, /alpha development/)
 	assert.equal(registry.definitions.some((tool) => tool.name === "search_skills"), false)
-	const applyPatch = await import("../tools/apply_patch.mjs")
 	const cancelledDir = join(dir, "cancelled-patch")
 	let signalChecks = 0
 	const cancelledPatch = await applyPatch.call(

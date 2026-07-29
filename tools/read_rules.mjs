@@ -1,5 +1,5 @@
 import { SANDBOX_DIR } from "../lib/config.mjs"
-import { formatAgentsMdContext, getAgentsMdContext, markAgentsMdContextDelivered } from "../lib/agentsMd.mjs"
+import { formatAgentsMdContext, getAgentsMdContext } from "../lib/agentsMd.mjs"
 import { resolvePath } from "../lib/paths.mjs"
 import { getSkillsCatalog } from "./load_skills.mjs"
 
@@ -34,6 +34,5 @@ export async function call(args, { signal } = {}) {
 	if (context.cancelled) return { content: [{ type: "text", text: "Error: Project context read cancelled" }], isError: true }
 	if (signal?.aborted) return { content: [{ type: "text", text: "Error: Project context read cancelled" }], isError: true }
 	const text = formatAgentsMdContext(context) + formatSkillsCatalog()
-	markAgentsMdContextDelivered(context)
 	return { content: [{ type: "text", text }] }
 }

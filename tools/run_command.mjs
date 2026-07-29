@@ -15,7 +15,6 @@ import { SANDBOX_DIR, DEFAULT_TIMEOUT_MS, MAX_OUTPUT_CHARS, MAX_TIMEOUT_MS } fro
 import { log } from "../lib/log.mjs"
 import { registerChild, terminateProcessTree, unregisterChild } from "../lib/process-tree.mjs"
 import { resolvePath } from "../lib/paths.mjs"
-import { getChangedAgentsMdBlock } from "../lib/agentsMd.mjs"
 
 // ponytail: 查一次 pwsh.exe 的位置：先查 PATH，再查 PowerShell 7 MSI 的固定安装目录。
 // 这个函数本身只做“查找”，不在模块加载时（import 阶段）调用——找不到 pwsh 时
@@ -313,15 +312,12 @@ function runCommand({ command, cwd, timeoutMs }, { signal } = {}) {
 }
 
 export async function call(args, context = {}) {
-	const cwdArg = args && args.cwd
-	const workDir = typeof cwdArg === "string" && cwdArg ? resolvePath(cwdArg) : SANDBOX_DIR
 	const result = await runCommand(args || {}, context)
-	const agentsMdBlock = await getChangedAgentsMdBlock(workDir, context)
 	const status = result.timedOut
 		? " (timed out, process killed)"
 		: result.cancelled
 			? " (cancelled, process killed)"
 			: ""
-	const text = `exit code: ${result.code}${status}\n\n--- stdout ---\n${result.stdout}\n\n--- stderr ---\n${result.stderr}${agentsMdBlock}`
+	const text = `exit code: ${result.code}${status}\n\n--- stdout ---\n${result.stdout}\n\n--- stderr ---\n${result.stderr}`
 	return { content: [{ type: "text", text }], isError: result.code === -1 }
 }

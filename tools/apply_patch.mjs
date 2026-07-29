@@ -10,7 +10,6 @@ import { dirname } from "node:path"
 import { setImmediate as yieldToEventLoop } from "node:timers/promises"
 import { resolvePath } from "../lib/paths.mjs"
 import { log } from "../lib/log.mjs"
-import { getChangedAgentsMdBlock } from "../lib/agentsMd.mjs"
 
 export const name = "apply_patch"
 
@@ -157,7 +156,5 @@ export async function call(args, context = {}) {
 		.map((r) => `[${r.status}] ${r.type} ${r.path}${r.output ? ` \u2014 ${r.output}` : ""}`)
 		.join("\n")
 	const hasFailure = results.some((r) => r.status === "failed")
-	const firstPath = operations[0] && operations[0].path
-	const agentsMdBlock = firstPath && !context.signal?.aborted ? await getChangedAgentsMdBlock(dirname(resolvePath(firstPath)), context) : ""
-	return { content: [{ type: "text", text: text + agentsMdBlock }], isError: hasFailure }
+	return { content: [{ type: "text", text }], isError: hasFailure }
 }

@@ -1064,7 +1064,7 @@ test("六个工具均经真实 HTTP 到达", async (t) => {
 	assert.equal(await readFile(patched, "utf8"), "created")
 	assert.match(JSON.parse(responses[3].body).result.content[0].text, /fixture-skill/)
 	assert.match(JSON.parse(responses[4].body).result.content[0].text, /created/)
-	assert.match(JSON.parse(responses[5].body).result.content[0].text, /project context/)
+	assert.match(JSON.parse(responses[5].body).result.content[0].text, /read rules/)
 	assert.match(JSON.parse(responses[5].body).result.content[0].text, /fixture-skill/)
 
 })
