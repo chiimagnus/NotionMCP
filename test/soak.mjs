@@ -7,7 +7,7 @@ import { join } from "node:path"
 
 const ROOT = join(import.meta.dirname, "..")
 const TOKEN = "0123456789abcdef".repeat(4)
-const WARMUP_REQUESTS = 500
+const WARMUP_REQUESTS = 1_000
 const MEASURED_REQUESTS = 1_000
 const MAX_HEAP_DELTA = 16 * 1024 * 1024
 const MAX_RSS_DELTA = 64 * 1024 * 1024
@@ -194,6 +194,18 @@ async function bindAndClose(port) {
 	await new Promise((resolve) => server.close(resolve))
 }
 
+async function traceSummary(logFile) {
+	const events = {}
+	const traceIds = new Set()
+	for (const line of (await readFile(logFile, "utf8")).trimEnd().split("\n")) {
+		const record = JSON.parse(line)
+		if (record.scope !== "http" || !record.traceId) continue
+		traceIds.add(record.traceId)
+		events[record.event] = (events[record.event] || 0) + 1
+	}
+	return { requests: traceIds.size, events }
+}
+
 if (typeof global.gc !== "function") throw new Error("soak 必须通过 node --expose-gc 运行")
 
 const temp = await mkdtemp(join(tmpdir(), "notionmcp-soak-"))
@@ -210,6 +222,7 @@ try {
 	const sandbox = join(temp, "sandbox")
 	const skills = join(temp, "skills")
 	const config = join(temp, ".env")
+	const logFile = join(temp, "mcp.log")
 	await mkdir(sandbox)
 	await mkdir(skills)
 	await writeFile(
@@ -227,7 +240,7 @@ try {
 		].join("\n"),
 	)
 	process.env.MCP_CONFIG_FILE = config
-	process.env.MCP_LOG_FILE = join(temp, "mcp.log")
+	process.env.MCP_LOG_FILE = logFile
 	const { createMcpHttpServer } = await import(`../lib/mcp-http.mjs?soak=${Date.now()}`)
 	lifecycle = createMcpHttpServer({ port: 0, token: TOKEN })
 	;({ port } = await lifecycle.listen())
@@ -290,6 +303,12 @@ try {
 	await waitForCondition(() => lifecycle.activeRequestCount === 0, "取消后 active request 未释放")
 	assert.equal(lifecycle.activeRequestCount, 0)
 	await request(port, agent, list)
+	const traces = await traceSummary(logFile)
+	assert.ok(traces.requests >= WARMUP_REQUESTS + MEASURED_REQUESTS + 12)
+	assert.ok(traces.events.cancelled >= 10)
+	assert.ok(traces.events.rejected >= 1)
+	assert.ok(traces.events.completed >= WARMUP_REQUESTS + MEASURED_REQUESTS + 1)
+	assert.equal(traces.events.failed || 0, 0)
 
 	summary = {
 		platform: process.platform,
@@ -299,6 +318,7 @@ try {
 		rss: { baseline: baseline.rss, after: after.rss, delta: rssDelta },
 		processes: { baseline: processBaseline, after: processAfter, delta: processAfter - processBaseline },
 		cancel: true,
+		traces,
 	}
 } catch (error) {
 	failure = error

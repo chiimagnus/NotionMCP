@@ -979,6 +979,8 @@ test("JSON-RPC 和协议版本错误互不污染后续请求", async (t) => {
 
 test("十个长请求占满 slot，第十一个和 batch 都不能启动命令", async (t) => {
 	const { lifecycle, port, token } = await startMcpServer(t)
+	const logFile = join(httpFixture.dir, "http.log")
+	const traceOffset = (await readFile(logFile, "utf8").catch(() => "")).length
 	const helper = join(httpFixture.dir, "http-tree.cjs")
 	await writeFile(
 		helper,
@@ -1025,6 +1027,15 @@ test("十个长请求占满 slot，第十一个和 batch 都不能启动命令",
 	const recovered = await Promise.all(Array.from({ length: 10 }, () => mcpRequest(port, token, TOOLS_LIST)))
 	assert.ok(recovered.every((response) => response.status === 200))
 	assert.equal(lifecycle.activeRequestCount, 0)
+	const events = {}
+	for (const record of (await readFile(logFile, "utf8")).slice(traceOffset).trimEnd().split("\n").map(JSON.parse)) {
+		if (record.scope !== "http" || !record.traceId) continue
+		events[record.event] = (events[record.event] || 0) + 1
+	}
+	assert.ok(events.cancelled >= 10)
+	assert.ok(events.rejected >= 1)
+	assert.ok(events.completed >= 10)
+	assert.equal(events.failed || 0, 0)
 })
 
 test("四个工具均经真实 HTTP 到达，apply_patch 在取消边界停止后续写入", async (t) => {
