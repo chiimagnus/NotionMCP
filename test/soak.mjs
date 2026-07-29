@@ -7,6 +7,12 @@ import { join } from "node:path"
 
 const ROOT = join(import.meta.dirname, "..")
 const TOKEN = "0123456789abcdef".repeat(4)
+const MCP_PROTOCOL_VERSION = "2026-07-28"
+const MCP_META = {
+	"io.modelcontextprotocol/protocolVersion": MCP_PROTOCOL_VERSION,
+	"io.modelcontextprotocol/clientInfo": { name: "notionmcp-soak", version: "1.0.0" },
+	"io.modelcontextprotocol/clientCapabilities": {},
+}
 const WARMUP_REQUESTS = 1_000
 const MEASURED_REQUESTS = 1_000
 const MAX_HEAP_DELTA = 16 * 1024 * 1024
@@ -52,7 +58,14 @@ function projectNodeProcessCount() {
 		.length
 }
 
+function modernMessage(message) {
+	if (!message || typeof message !== "object" || Array.isArray(message)) return message
+	const params = message.params && typeof message.params === "object" && !Array.isArray(message.params) ? message.params : {}
+	return { ...message, params: { ...params, _meta: { ...MCP_META, ...params._meta } } }
+}
+
 function request(port, agent, message) {
+	const modern = modernMessage(message)
 	return new Promise((resolve, reject) => {
 		const req = http.request(
 			{
@@ -65,7 +78,9 @@ function request(port, agent, message) {
 					Authorization: `Bearer ${TOKEN}`,
 					Accept: "application/json, text/event-stream",
 					"Content-Type": "application/json",
-					"Mcp-Protocol-Version": "2025-03-26",
+					"Mcp-Protocol-Version": MCP_PROTOCOL_VERSION,
+					"Mcp-Method": modern.method,
+					...(modern.method === "tools/call" && modern.params?.name ? { "Mcp-Name": modern.params.name } : {}),
 				},
 			},
 			(res) => {
@@ -82,11 +97,12 @@ function request(port, agent, message) {
 			},
 		)
 		req.once("error", reject)
-		req.end(JSON.stringify(message))
+		req.end(JSON.stringify(modern))
 	})
 }
 
 function openToolRequest(port, agent, message) {
+	const modern = modernMessage(message)
 	let req
 	const response = new Promise((resolve, reject) => {
 		req = http.request(
@@ -100,7 +116,9 @@ function openToolRequest(port, agent, message) {
 					Authorization: `Bearer ${TOKEN}`,
 					Accept: "application/json, text/event-stream",
 					"Content-Type": "application/json",
-					"Mcp-Protocol-Version": "2025-03-26",
+					"Mcp-Protocol-Version": MCP_PROTOCOL_VERSION,
+					"Mcp-Method": modern.method,
+					...(modern.method === "tools/call" && modern.params?.name ? { "Mcp-Name": modern.params.name } : {}),
 				},
 			},
 			(res) => {
@@ -109,7 +127,7 @@ function openToolRequest(port, agent, message) {
 			},
 		)
 		req.once("error", reject)
-		req.end(JSON.stringify(message))
+		req.end(JSON.stringify(modern))
 	})
 	return { req, response }
 }

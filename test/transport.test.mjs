@@ -6,7 +6,6 @@ import { join } from "node:path"
 import test, { after } from "node:test"
 
 const TOKEN = "0123456789abcdef".repeat(4)
-const TOOLS_LIST = { jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }
 const MODERN_PROTOCOL_VERSION = "2026-07-28"
 const MODERN_TOOLS_LIST = {
 	jsonrpc: "2.0",
@@ -68,18 +67,6 @@ function request(port, { path = "/mcp", method = "POST", headers = {}, body = ""
 	})
 }
 
-function legacyRequest(port, message, authorization = `Bearer ${TOKEN}`) {
-	return request(port, {
-		headers: {
-			Authorization: authorization,
-			Accept: "application/json, text/event-stream",
-			"Content-Type": "application/json",
-			"Mcp-Protocol-Version": "2025-03-26",
-		},
-		body: JSON.stringify(message),
-	})
-}
-
 function modernRequest(port, message, headers = {}) {
 	return request(port, {
 		headers: {
@@ -130,16 +117,26 @@ after(async () => {
 	else process.env.MCP_LOG_FILE = fixture.previous.log
 })
 
-test("旧版 Streamable HTTP 探测、取消和后续请求互相隔离", async (t) => {
+test("现代 Streamable HTTP 探测、取消和后续请求互相隔离", async (t) => {
 	const { module, logFile } = await getFixture()
 	const lifecycle = module.createMcpHttpServer({ port: 0, token: TOKEN })
 	t.after(() => lifecycle.shutdown())
 	const { port } = await lifecycle.listen()
 
-	const initial = await legacyRequest(port, TOOLS_LIST)
+	const initial = await modernRequest(port, MODERN_TOOLS_LIST)
 	assert.equal(initial.status, 200)
 	assert.equal(JSON.parse(initial.body).result.tools.length, 6)
 	assert.equal(initial.headers["mcp-session-id"], undefined)
+	const rejectedLegacy = await request(port, {
+		headers: {
+			Authorization: `Bearer ${TOKEN}`,
+			Accept: "application/json, text/event-stream",
+			"Content-Type": "application/json",
+			"Mcp-Protocol-Version": "2025-03-26",
+		},
+		body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
+	})
+	assert.equal(rejectedLegacy.status, 400)
 
 	const getProbe = await request(port, { method: "GET" })
 	assert.equal(getProbe.status, 405)
@@ -164,16 +161,16 @@ test("旧版 Streamable HTTP 探测、取消和后续请求互相隔离", async 
 	await waitFor(() => lifecycle.activeRequestCount === 1, "partial request did not occupy a slot")
 	partial.destroy()
 	await waitFor(() => lifecycle.activeRequestCount === 0, "cancelled request did not release its slot")
-	assert.equal((await legacyRequest(port, TOOLS_LIST)).status, 200)
+	assert.equal((await modernRequest(port, MODERN_TOOLS_LIST)).status, 200)
 
 	const bodyMarker = "REQUEST_BODY_MUST_NOT_BE_LOGGED"
-	assert.equal((await legacyRequest(port, { marker: bodyMarker }, "Bearer wrong")).status, 401)
+	assert.equal((await modernRequest(port, { ...MODERN_TOOLS_LIST, marker: bodyMarker }, { Authorization: "Bearer wrong" })).status, 401)
 	const log = await readFile(logFile, "utf8")
 	assert.doesNotMatch(log, new RegExp(TOKEN))
 	assert.doesNotMatch(log, new RegExp(bodyMarker))
 })
 
-test("2026 Streamable HTTP 校验元数据且不破坏旧版 JSON 响应", async (t) => {
+test("2026 Streamable HTTP 校验元数据和头部一致性", async (t) => {
 	const { module } = await getFixture()
 	const lifecycle = module.createMcpHttpServer({ port: 0, token: TOKEN })
 	t.after(() => lifecycle.shutdown())

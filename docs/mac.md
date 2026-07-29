@@ -56,4 +56,4 @@ Notion 中选择 **Add connection → Custom MCP server**：
 | 鉴权方式 | Bearer Token |
 | Token | 钥匙串中的裸值 |
 
-启动器只管理 `/mcp`；不会 `tailscale funnel reset`，也不会删除其他 route。旧版本项目根路由仅在目标精确匹配本机端口时迁移。排障见 [operations.md](./operations.md)。
+启动器只管理 `/mcp`；不会 `tailscale funnel reset`，也不会删除其他 route。排障见 [operations.md](./operations.md)。

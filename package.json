@@ -16,7 +16,6 @@
 		"build": "node --check bin/notionmcp.mjs && node --check lib/up.mjs && node --check lib/mcp-http.mjs && node --check lib/service-manager.mjs && node --check lib/tailscale.mjs && node --check lib/doctor.mjs && node --check lib/platform-services.mjs && node --check lib/agentsMd.mjs && node --check tools/read_file.mjs && node --check tools/project_context.mjs && node --check tools/load_skills.mjs"
 	},
 	"dependencies": {
-		"@modelcontextprotocol/sdk": "^1.30.0",
 		"@modelcontextprotocol/server": "^2.0.0"
 	}
 }

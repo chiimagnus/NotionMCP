@@ -10,6 +10,12 @@ import test, { after } from "node:test"
 
 const ROOT = join(import.meta.dirname, "..")
 const PLATFORM_TOKEN = "0123456789abcdef".repeat(4)
+const MCP_PROTOCOL_VERSION = "2026-07-28"
+const MCP_META = {
+	"io.modelcontextprotocol/protocolVersion": MCP_PROTOCOL_VERSION,
+	"io.modelcontextprotocol/clientInfo": { name: "notionmcp-test", version: "1.0.0" },
+	"io.modelcontextprotocol/clientCapabilities": {},
+}
 
 function waitForExit(child, timeoutMs = 5_000) {
 	return new Promise((resolve, reject) => {
@@ -584,16 +590,25 @@ function httpRequest(port, { path = "/mcp", method = "POST", headers = {}, body 
 	})
 }
 
+function modernMessage(message) {
+	if (!message || typeof message !== "object" || Array.isArray(message)) return message
+	const params = message.params && typeof message.params === "object" && !Array.isArray(message.params) ? message.params : {}
+	return { ...message, params: { ...params, _meta: { ...MCP_META, ...params._meta } } }
+}
+
 function mcpRequest(port, token, message, extraHeaders = {}) {
+	const modern = modernMessage(message)
 	return httpRequest(port, {
 		headers: {
 			Authorization: `Bearer ${token}`,
 			Accept: "application/json, text/event-stream",
 			"Content-Type": "application/json",
-			"Mcp-Protocol-Version": "2025-03-26",
+			"Mcp-Protocol-Version": MCP_PROTOCOL_VERSION,
+			...(modern?.method ? { "Mcp-Method": modern.method } : {}),
+			...(modern?.method === "tools/call" && modern.params?.name ? { "Mcp-Name": modern.params.name } : {}),
 			...extraHeaders,
 		},
-		body: JSON.stringify(message),
+		body: JSON.stringify(modern),
 	})
 }
 
@@ -698,6 +713,7 @@ function toolCall(name, args, id = 1) {
 }
 
 function openMcpRequest(port, token, message) {
+	const modern = modernMessage(message)
 	let responseStarted = false
 	let req
 	const response = new Promise((resolve, reject) => {
@@ -711,7 +727,9 @@ function openMcpRequest(port, token, message) {
 					Authorization: `Bearer ${token}`,
 					Accept: "application/json, text/event-stream",
 					"Content-Type": "application/json",
-					"Mcp-Protocol-Version": "2025-03-26",
+					"Mcp-Protocol-Version": MCP_PROTOCOL_VERSION,
+					"Mcp-Method": modern.method,
+					...(modern.method === "tools/call" && modern.params?.name ? { "Mcp-Name": modern.params.name } : {}),
 				},
 			},
 			(res) => {
@@ -729,7 +747,7 @@ function openMcpRequest(port, token, message) {
 		req.once("error", (error) => {
 			if (!responseStarted) reject(error)
 		})
-		req.end(JSON.stringify(message))
+		req.end(JSON.stringify(modern))
 	})
 	return { req, response }
 }
@@ -766,7 +784,7 @@ function repositoryNodeProcessCount() {
 		.length
 }
 
-test("原生无状态 HTTP 完成基础 MCP 协议且可确定关闭", async (t) => {
+test("现代无状态 HTTP 完成基础 MCP 协议且可确定关闭", async (t) => {
 	const { lifecycle, port, token } = await startMcpServer(t)
 
 	const unauthorized = await httpRequest(port, {
@@ -776,20 +794,8 @@ test("原生无状态 HTTP 完成基础 MCP 协议且可确定关闭", async (t)
 	assert.equal(unauthorized.status, 401)
 
 	const messages = [
-		{
-			jsonrpc: "2.0",
-			id: 1,
-			method: "initialize",
-			params: {
-				protocolVersion: "2025-03-26",
-				capabilities: {},
-				clientInfo: { name: "test", version: "1" },
-			},
-		},
-		{ jsonrpc: "2.0", method: "notifications/initialized" },
-		{ jsonrpc: "2.0", id: 2, method: "ping" },
-		{ jsonrpc: "2.0", id: 3, method: "tools/list", params: {} },
-		{ jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "missing", arguments: {} } },
+		{ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} },
+		{ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "missing", arguments: {} } },
 	]
 	const responses = []
 	for (const message of messages) {
@@ -798,11 +804,8 @@ test("原生无状态 HTTP 完成基础 MCP 协议且可确定关闭", async (t)
 		assert.equal(response.headers["mcp-session-id"], undefined)
 	}
 	assert.equal(responses[0].status, 200)
-	assert.equal(JSON.parse(responses[0].body).result.serverInfo.name, "notionmcp")
-	assert.equal(responses[1].status, 202)
-	assert.equal(JSON.parse(responses[2].body).result !== undefined, true)
-	assert.equal(JSON.parse(responses[3].body).result.tools.length, 6)
-	assert.equal(JSON.parse(responses[4].body).error.code, -32602)
+	assert.equal(JSON.parse(responses[0].body).result.tools.length, 6)
+	assert.equal(JSON.parse(responses[1].body).error.code, -32602)
 	assert.equal(lifecycle.activeRequestCount, 0)
 
 	await lifecycle.shutdown()
@@ -958,16 +961,11 @@ test("JSON-RPC 和协议版本错误互不污染后续请求", async (t) => {
 	}
 
 	const unknown = await mcpRequest(port, token, { jsonrpc: "2.0", id: 5, method: "unknown" })
-	assert.equal(unknown.status, 200)
-	assert.equal(JSON.parse(unknown.body).error.code, -32601)
+	assert.equal(unknown.status, 404)
 	await assertHttpHealthy(lifecycle, port, token)
 	const badVersion = await mcpRequest(port, token, TOOLS_LIST, { "Mcp-Protocol-Version": "1900-01-01" })
 	assert.equal(badVersion.status, 400)
 	await assertHttpHealthy(lifecycle, port, token)
-	const initialized = await mcpRequest(port, token, { jsonrpc: "2.0", method: "notifications/initialized" })
-	assert.equal(initialized.status, 202)
-	assert.equal(initialized.headers["mcp-session-id"], undefined)
-
 	const requestListeners = lifecycle.httpServer.listenerCount("request")
 	for (let i = 0; i < 20; i += 1) {
 		assert.equal((await mcpRequest(port, token, [])).status, 400)
