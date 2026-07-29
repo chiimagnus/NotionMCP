@@ -8,10 +8,12 @@
 		"node": ">=20.11"
 	},
 	"scripts": {
-		"start": "node lib/up.mjs",
-		"test": "node --test test/lifecycle.test.mjs test/transport.test.mjs test/service-manager.test.mjs",
+		"start": "node bin/notionmcp.mjs start",
+		"status": "node bin/notionmcp.mjs status",
+		"doctor": "node bin/notionmcp.mjs doctor",
+		"test": "node --test test/lifecycle.test.mjs test/transport.test.mjs test/service-manager.test.mjs test/doctor.test.mjs test/platform-services.test.mjs",
 		"test:soak": "node --expose-gc test/soak.mjs",
-		"build": "node --check lib/up.mjs && node --check lib/mcp-http.mjs && node --check lib/service-manager.mjs && node --check lib/tailscale.mjs"
+		"build": "node --check bin/notionmcp.mjs && node --check lib/up.mjs && node --check lib/mcp-http.mjs && node --check lib/service-manager.mjs && node --check lib/tailscale.mjs && node --check lib/doctor.mjs && node --check lib/platform-services.mjs"
 	},
 	"dependencies": {
 		"@modelcontextprotocol/sdk": "^1.30.0",
