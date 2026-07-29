@@ -75,6 +75,7 @@ test("read_file 只读 UTF-8 普通文件，并校验范围、大小、二进制
 	assert.equal((await agents.getAgentsMdContext(nested, { globalFile, signal: cancelled.signal })).cancelled, true)
 
 	const projectContext = await import(`../tools/project_context.mjs?test=${Date.now()}-${Math.random()}`)
+	assert.equal((await projectContext.call({ cwd: 1 })).isError, true)
 	assert.match((await projectContext.call({ cwd: nested })).content[0].text, /inner rule changed/)
 	const runCommand = await import(`../tools/run_command.mjs?test=${Date.now()}-${Math.random()}`)
 	assert.equal((await runCommand.call({ command: "printf context", cwd: 1 })).isError, true)

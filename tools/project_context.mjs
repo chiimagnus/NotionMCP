@@ -32,7 +32,8 @@ export async function call(args, { signal } = {}) {
 	const workDir = cwd ? resolvePath(cwd) : SANDBOX_DIR
 	const context = await getAgentsMdContext(workDir, { signal })
 	if (context.cancelled) return { content: [{ type: "text", text: "Error: Project context read cancelled" }], isError: true }
-	markAgentsMdContextDelivered(context)
 	if (signal?.aborted) return { content: [{ type: "text", text: "Error: Project context read cancelled" }], isError: true }
-	return { content: [{ type: "text", text: formatAgentsMdContext(context) + formatSkillsCatalog() }] }
+	const text = formatAgentsMdContext(context) + formatSkillsCatalog()
+	markAgentsMdContextDelivered(context)
+	return { content: [{ type: "text", text }] }
 }
