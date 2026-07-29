@@ -88,4 +88,6 @@ Notion 中选择 **Add connection → Custom MCP server**：
 | 鉴权方式 | Bearer Token |
 | Token | `.env` 中 `MCP_TOKEN_LINUX` 的裸值 |
 
+Server URL 始终填写 `/mcp`，不用手动改为 `/sse`：Notion 的旧 SSE 握手会由服务自动兼容。
+
 具体排障见 [operations.md](./operations.md)。

@@ -1,6 +1,6 @@
 # 把本地文件夹接入 Notion AI
 
-NotionMCP 是无 Session 的 MCP server：原生支持 MCP `2026-07-28`，并通过当前 SDK 的无状态兼容层接受 2025-era 客户端；Node 只监听 `127.0.0.1`，Tailscale Funnel 只公开 `/mcp`。每次请求都有脱敏 `X-Request-Id`，本机 `/healthz` 不经 Funnel 公开。
+NotionMCP 原生支持 MCP `2026-07-28`，并兼容 2025 无状态客户端和 Notion 仍使用的 2024 HTTP+SSE。三者都使用同一个 `/mcp` URL；Node 只监听 `127.0.0.1`，Tailscale Funnel 只公开 `/mcp`。每次请求都有脱敏 `X-Request-Id`，本机 `/healthz` 不经 Funnel 公开。
 
 `MCP_SANDBOX_DIR_*` 只是默认工作目录，不是硬隔离。Token 泄露等价于允许公网调用当前用户可执行的命令；重要数据必须另行备份。
 
@@ -27,6 +27,8 @@ node bin/notionmcp.mjs install --dry-run
 ## Notion Custom Agent 配置
 
 在 Custom Agent 的 `Settings → Tools & Access` 中连接 `https://<你的设备>.<tailnet>.ts.net/mcp`，按工具单独启用：
+
+不用把 URL 改成 `/sse`：Notion 将该 URL 作为旧 SSE 入口发起 `GET` 时，服务会自动切换到兼容 transport；现代客户端继续以 `POST /mcp` 使用 Streamable HTTP。
 
 - 设为“自动运行”：`project_context`、`load_skills`、`read_file`、`read_image`。
 - 设为“始终询问”：`run_command`、`apply_patch`。前者可以执行任意命令，后者会修改文件；不要选择服务器级的永久允许。

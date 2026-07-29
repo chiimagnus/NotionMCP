@@ -5,7 +5,8 @@ import { runCommand, startService, stopService } from "../lib/service-manager.mj
 import { createTailscaleManager } from "../lib/tailscale.mjs"
 
 const PORT = 8123
-const TARGET = `http://127.0.0.1:${PORT}`
+const TARGET = `http://127.0.0.1:${PORT}/mcp`
+const LEGACY_TARGET = `http://127.0.0.1:${PORT}`
 
 function status({ path = "/mcp", target = TARGET, allowed = true } = {}) {
 	return {
@@ -70,6 +71,23 @@ test("Funnel 只配置并精确关闭 /mcp", async () => {
 	])
 	await manager.disableMcpFunnel()
 	assert.deepEqual(runner.calls[3].args, ["funnel", "--set-path=/mcp", "off"])
+})
+
+test("历史 NotionMCP 目标会迁移到保留 /mcp 前缀的代理目标", async () => {
+	const runner = fakeRunner([
+		status({ target: LEGACY_TARGET }),
+		{ status: 0, stdout: "", stderr: "" },
+		status(),
+	])
+	const manager = createTailscaleManager({ path: "tailscale", run: runner.run })
+	const configured = await manager.ensureMcpFunnel(PORT)
+	assert.equal(configured.changed, true)
+	assert.equal(configured.status.publicUrl, "https://host.example.ts.net:443/mcp")
+	assert.deepEqual(runner.calls.map((call) => call.args), [
+		["funnel", "status", "--json"],
+		["funnel", "--bg", "--set-path=/mcp", TARGET],
+		["funnel", "status", "--json"],
+	])
 })
 
 test("已正确配置不改 Funnel；错误目标中止且不覆盖用户配置", async () => {

@@ -849,7 +849,11 @@ test("HTTP 路由、媒体类型和 body 上限失败后 server 仍可复用", a
 	const route = await httpRequest(port, { path: "/other", method: "POST" })
 	assert.equal(route.status, 404)
 	await assertHttpHealthy(lifecycle, port, token)
-	for (const method of ["GET", "PUT"]) {
+	const sseUnauthorized = await httpRequest(port, { method: "GET", headers: { Accept: "text/event-stream" } })
+	assert.equal(sseUnauthorized.status, 401)
+	assert.equal(sseUnauthorized.headers["www-authenticate"], "Bearer")
+	await assertHttpHealthy(lifecycle, port, token)
+	for (const method of ["PUT"]) {
 		const response = await httpRequest(port, { method })
 		assert.equal(response.status, 405)
 		assert.equal(response.headers.allow, "POST")

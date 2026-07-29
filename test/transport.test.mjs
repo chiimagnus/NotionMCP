@@ -67,6 +67,43 @@ function request(port, { path = "/mcp", method = "POST", headers = {}, body = ""
 	})
 }
 
+function openSse(port, path = "/mcp") {
+	return new Promise((resolve, reject) => {
+		const messages = []
+		let buffer = ""
+		const req = http.request({
+			host: "127.0.0.1",
+			port,
+			path,
+			method: "GET",
+			headers: { Authorization: `Bearer ${TOKEN}`, Accept: "text/event-stream" },
+		})
+		req.once("error", reject)
+		req.once("response", (res) => {
+			if (res.statusCode !== 200) {
+				reject(new Error(`SSE status ${res.statusCode}`))
+				res.resume()
+				return
+			}
+			res.setEncoding("utf8")
+			res.on("data", (chunk) => {
+				buffer += chunk
+				let boundary
+				while ((boundary = buffer.indexOf("\n\n")) >= 0) {
+					const frame = buffer.slice(0, boundary)
+					buffer = buffer.slice(boundary + 2)
+					const event = frame.match(/^event: (.+)$/m)?.[1]
+					const data = frame.match(/^data: (.+)$/m)?.[1]
+					if (event === "endpoint" && data) resolve({ endpoint: data, messages, close: () => { req.destroy(); res.destroy() } })
+					if (event === "message" && data) messages.push(JSON.parse(data))
+				}
+			})
+			res.once("error", reject)
+		})
+		req.end()
+	})
+}
+
 function modernRequest(port, message, headers = {}) {
 	return request(port, {
 		headers: {
@@ -155,9 +192,9 @@ test("现代 Streamable HTTP 探测、取消和后续请求互相隔离", async 
 	assert.equal(legacyToolsList.status, 200)
 	assert.match(legacyToolsList.body, /"name":"project_context"/)
 
-	const getProbe = await request(port, { method: "GET" })
-	assert.equal(getProbe.status, 405)
-	assert.equal(getProbe.headers.allow, "POST")
+	const wrongMethod = await request(port, { method: "PUT" })
+	assert.equal(wrongMethod.status, 405)
+	assert.equal(wrongMethod.headers.allow, "POST")
 	assert.equal(lifecycle.activeRequestCount, 0)
 	assert.equal((await request(port, { path: "/not-mcp" })).status, 404)
 
@@ -224,4 +261,59 @@ test("2026 Streamable HTTP 校验元数据和头部一致性", async (t) => {
 
 	const invalidOrigin = await modernRequest(port, MODERN_TOOLS_LIST, { Origin: "https://attacker.example" })
 	assert.equal(invalidOrigin.status, 403)
+})
+
+test("旧 HTTP+SSE 直接使用 Notion 配置的 /mcp 地址建立会话并调用工具", async (t) => {
+	const { module } = await getFixture()
+	const lifecycle = module.createMcpHttpServer({ port: 0, token: TOKEN })
+	t.after(() => lifecycle.shutdown())
+	const { port } = await lifecycle.listen()
+
+	assert.equal(
+		(await request(port, { path: "/mcp", method: "GET", headers: { Accept: "text/event-stream" } })).status,
+		401,
+	)
+	const sse = await openSse(port)
+	t.after(sse.close)
+	assert.match(sse.endpoint, /^\/mcp\/messages\?sessionId=/)
+	const headers = { Authorization: `Bearer ${TOKEN}`, "Content-Type": "application/json" }
+	const initialize = await request(port, {
+		path: sse.endpoint,
+		headers,
+		body: JSON.stringify({
+			jsonrpc: "2.0",
+			id: 1,
+			method: "initialize",
+			params: { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "notion-sse", version: "1.0" } },
+		}),
+	})
+	assert.equal(initialize.status, 202)
+	await waitFor(() => sse.messages.some((message) => message.id === 1), "SSE initialize response did not arrive")
+	assert.equal(sse.messages.find((message) => message.id === 1).result.serverInfo.name, "notionmcp")
+	assert.equal(
+		(
+			await request(port, {
+				path: sse.endpoint,
+				headers,
+				body: JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized", params: {} }),
+			})
+		).status,
+		202,
+	)
+	assert.equal(
+		(
+			await request(port, {
+				path: sse.endpoint,
+				headers,
+				body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} }),
+			})
+		).status,
+		202,
+	)
+	await waitFor(() => sse.messages.some((message) => message.id === 2), "SSE tools/list response did not arrive")
+	assert.equal(sse.messages.find((message) => message.id === 2).result.tools.length, 6)
+	assert.equal(
+		(await request(port, { path: "/mcp/messages?sessionId=missing", headers, body: JSON.stringify({}) })).status,
+		404,
+	)
 })
