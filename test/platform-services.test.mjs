@@ -54,6 +54,10 @@ test("三平台安装卸载使用精确命令，Windows XML 含 UTF-16LE BOM", a
 		assert.ok(calls.every(([command]) => !/sh|cmd/i.test(command)))
 		if (kind === "linux") assert.deepEqual(calls.map(([, args]) => args), [["--user", "daemon-reload"], ["--user", "enable", "--now", "notionmcp.service"], ["--user", "disable", "--now", "notionmcp.service"], ["--user", "daemon-reload"]])
 		if (kind === "windows") assert.deepEqual(calls.map(([, args]) => args), [["/Create", "/TN", "NotionMCP", "/XML", installed.file, "/F"], ["/Delete", "/TN", "NotionMCP", "/F"]])
+		const callCount = calls.length
+		const repeated = await uninstallPlatformService({ port: 8000 }, options)
+		assert.equal(repeated.action, "uninstalled")
+		assert.equal(calls.length, callCount)
 	}
 	assert.deepEqual([...serviceBytes("windows", "x")], [0xff, 0xfe, 0x78, 0x00])
 })
