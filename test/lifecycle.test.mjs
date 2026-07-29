@@ -1044,7 +1044,7 @@ test("六个工具均经真实 HTTP 到达", async (t) => {
 	const patched = join(httpFixture.dir, "http-patched.txt")
 	const calls = [
 		toolCall("run_command", { command: nodeCommand(commandHelper) }, 20),
-		toolCall("read_image", { path: image }, 21),
+		toolCall("read_image", { path: image, detail: "original" }, 21),
 		toolCall("apply_patch", {
 			operations: [{ type: "create_file", path: patched, content: "created", overwrite: true }],
 		}, 22),
