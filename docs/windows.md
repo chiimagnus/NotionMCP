@@ -29,7 +29,7 @@ npm install
 & .\up.ps1
 ```
 
-看到 `MCP 已在 127.0.0.1:<端口>/mcp 启动`、`Funnel 仅暴露 /mcp` 和完整的 `Notion MCP URL` 后，再继续配置 Notion。这个方式必须保持终端打开；按 `Ctrl+C` 会停止服务并撤销本项目的 `/mcp` Funnel route。
+看到 `MCP 已在 127.0.0.1:<端口>/mcp 启动`、`Funnel 仅暴露 MCP 路径：/mcp、/mcp/sse、/mcp/messages` 和完整的 `Notion MCP URL` 后，再继续配置 Notion。这个方式必须保持终端打开；按 `Ctrl+C` 会停止服务并撤销本项目的 MCP Funnel paths。
 
 `up.ps1` 会先验证 PowerShell 7 与 Node；若已经确认环境，也可执行 `npm start`。
 
@@ -73,7 +73,7 @@ schtasks.exe /Run /TN NotionMCP
 node bin/notionmcp.mjs uninstall
 ```
 
-服务只监听 `127.0.0.1:<端口>`；Tailscale Funnel 只公开 `/mcp`。启动器只管理该路径，不会 `tailscale funnel reset`，也不会删除其他 route。
+服务只监听 `127.0.0.1:<端口>`；Tailscale Funnel 只公开 `/mcp`、`/mcp/sse` 和 `/mcp/messages`。启动器只管理这三条路径，不会 `tailscale funnel reset`，也不会删除其他 route。
 
 Notion 中选择 **Add connection → Custom MCP server**：
 
@@ -83,6 +83,6 @@ Notion 中选择 **Add connection → Custom MCP server**：
 | 鉴权方式 | Bearer Token |
 | Token | `.env` 中 `MCP_TOKEN_WINDOWS` 的裸值 |
 
-Server URL 始终填写 `/mcp`，不用手动改为 `/sse`：Notion 的旧 SSE 握手会由服务自动兼容。
+Notion 的 Server URL 始终填写 `/mcp`。服务会兼容 Notion 当前的 2025 GET 通知流；只有明确要求 2024 HTTP+SSE 地址的旧客户端才填写 `/mcp/sse`，不要把它用于 Notion。
 
 排障见 [operations.md](./operations.md)。
