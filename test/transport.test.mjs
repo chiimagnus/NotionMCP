@@ -7,6 +7,19 @@ import test, { after } from "node:test"
 
 const TOKEN = "0123456789abcdef".repeat(4)
 const TOOLS_LIST = { jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }
+const MODERN_PROTOCOL_VERSION = "2026-07-28"
+const MODERN_TOOLS_LIST = {
+	jsonrpc: "2.0",
+	id: 2,
+	method: "tools/list",
+	params: {
+		_meta: {
+			"io.modelcontextprotocol/protocolVersion": MODERN_PROTOCOL_VERSION,
+			"io.modelcontextprotocol/clientInfo": { name: "notionmcp-test", version: "1.0.0" },
+			"io.modelcontextprotocol/clientCapabilities": {},
+		},
+	},
+}
 
 async function writeConfig(dir) {
 	const config = join(dir, ".env")
@@ -52,6 +65,20 @@ function legacyRequest(port, message, authorization = `Bearer ${TOKEN}`) {
 			Accept: "application/json, text/event-stream",
 			"Content-Type": "application/json",
 			"Mcp-Protocol-Version": "2025-03-26",
+		},
+		body: JSON.stringify(message),
+	})
+}
+
+function modernRequest(port, message, headers = {}) {
+	return request(port, {
+		headers: {
+			Authorization: `Bearer ${TOKEN}`,
+			Accept: "application/json, text/event-stream",
+			"Content-Type": "application/json",
+			"Mcp-Protocol-Version": MODERN_PROTOCOL_VERSION,
+			"Mcp-Method": message.method,
+			...headers,
 		},
 		body: JSON.stringify(message),
 	})
@@ -134,4 +161,23 @@ test("旧版 Streamable HTTP 探测、取消和后续请求互相隔离", async 
 	const log = await readFile(logFile, "utf8")
 	assert.doesNotMatch(log, new RegExp(TOKEN))
 	assert.doesNotMatch(log, new RegExp(bodyMarker))
+})
+
+test("2026 Streamable HTTP 校验元数据且不破坏旧版 JSON 响应", async (t) => {
+	const { module } = await getFixture()
+	const lifecycle = module.createMcpHttpServer({ port: 0, token: TOKEN })
+	t.after(() => lifecycle.shutdown())
+	const { port } = await lifecycle.listen()
+
+	const current = await modernRequest(port, MODERN_TOOLS_LIST)
+	assert.equal(current.status, 200)
+	assert.match(current.headers["content-type"], /^application\/json/)
+	assert.equal(JSON.parse(current.body).result.tools.length, 4)
+
+	const mismatchedMethod = await modernRequest(port, MODERN_TOOLS_LIST, { "Mcp-Method": "tools/call" })
+	assert.equal(mismatchedMethod.status, 400)
+	assert.equal(JSON.parse(mismatchedMethod.body).error.code, -32020)
+
+	const invalidOrigin = await modernRequest(port, MODERN_TOOLS_LIST, { Origin: "https://attacker.example" })
+	assert.equal(invalidOrigin.status, 403)
 })
