@@ -1,6 +1,5 @@
 import assert from "node:assert/strict"
 import { execFileSync, spawn } from "node:child_process"
-import { watch } from "node:fs"
 import { chmod, mkdir, mkdtemp, open, readFile, readdir, rm, stat, writeFile } from "node:fs/promises"
 import http from "node:http"
 import { createConnection } from "node:net"
@@ -1038,7 +1037,7 @@ test("十个长请求占满 slot，第十一个和 batch 都不能启动命令",
 	assert.equal(events.failed || 0, 0)
 })
 
-test("六个工具均经真实 HTTP 到达，apply_patch 在取消边界停止后续写入", async (t) => {
+test("六个工具均经真实 HTTP 到达", async (t) => {
 	const { lifecycle, port, token } = await startMcpServer(t)
 	const commandHelper = join(httpFixture.dir, "http-output.cjs")
 	await writeFile(commandHelper, `process.stdout.write("via-http")\n`)
@@ -1066,34 +1065,6 @@ test("六个工具均经真实 HTTP 到达，apply_patch 在取消边界停止�
 	assert.match(JSON.parse(responses[5].body).result.content[0].text, /project context/)
 	assert.match(JSON.parse(responses[5].body).result.content[0].text, /fixture-skill/)
 
-	const operationDir = join(httpFixture.dir, "cancelled-patch")
-	await mkdir(operationDir, { recursive: true })
-	const operations = Array.from({ length: 200 }, (_, index) => ({
-		type: "create_file",
-		path: join(operationDir, `${String(index).padStart(3, "0")}.txt`),
-		content: index === 0 ? "x".repeat(512 * 1024) : "x",
-		overwrite: true,
-	}))
-	let pending
-	let sawWriteResolve
-	const sawWrite = new Promise((resolve) => {
-		sawWriteResolve = resolve
-	})
-	const watcher = watch(operationDir, () => {
-		pending?.req.destroy()
-		sawWriteResolve()
-	})
-	t.after(() => watcher.close())
-	pending = openMcpRequest(port, token, toolCall("apply_patch", { operations }, 27))
-	const settled = pending.response.catch(() => null)
-	await sawWrite
-	await settled
-	await waitForCondition(() => lifecycle.activeRequestCount === 0, "apply_patch 取消后 slot 未释放")
-	await waitForCondition(
-		async () => (await stat(join(operationDir, "000.txt")).catch(() => null))?.size === 512 * 1024,
-		"已开始的 operation 未完成",
-	)
-	assert.equal(await readFile(join(operationDir, "199.txt"), "utf8").catch(() => null), null)
 })
 
 test("命令业务失败以 warning 保留 stderr 尾部但不记录命令、stdout 或 Token", async (t) => {

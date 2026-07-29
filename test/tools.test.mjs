@@ -98,6 +98,21 @@ test("read_file 只读 UTF-8 普通文件，并校验范围、大小、二进制
 	assert.match(registry.definitions.find((tool) => tool.name === "read_image").description, /自动运行/)
 	assert.doesNotMatch(loadSkills.definition.description, /alpha development/)
 	assert.equal(registry.definitions.some((tool) => tool.name === "search_skills"), false)
+	const applyPatch = await import("../tools/apply_patch.mjs")
+	const cancelledDir = join(dir, "cancelled-patch")
+	let signalChecks = 0
+	const cancelledPatch = await applyPatch.call(
+		{
+			operations: [
+				{ type: "create_file", path: join(cancelledDir, "first.txt"), content: "first" },
+				{ type: "create_file", path: join(cancelledDir, "second.txt"), content: "second" },
+			],
+		},
+		{ signal: { get aborted() { return signalChecks++ > 0 } } },
+	)
+	assert.equal(cancelledPatch.isError, true)
+	assert.equal(await readFile(join(cancelledDir, "first.txt"), "utf8"), "first")
+	await assert.rejects(readFile(join(cancelledDir, "second.txt")), { code: "ENOENT" })
 	const projectWithSkills = await projectContext.call({ cwd: nested })
 	assert.match(projectWithSkills.content[0].text, /key: skills\/alpha\n  name: Alpha\n  description: alpha development workflow/)
 	assert.match(projectWithSkills.content[0].text, /key: skills\/nested\/beta\n  name: Beta\n  description: nested review workflow/)
