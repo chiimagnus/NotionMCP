@@ -276,7 +276,7 @@ test("2026 Streamable HTTP 校验元数据和头部一致性", async (t) => {
 })
 
 test("旧 HTTP+SSE 直接使用 Notion 配置的 /mcp 地址建立会话并调用工具", async (t) => {
-	const { module } = await getFixture()
+	const { module, logFile } = await getFixture()
 	const lifecycle = module.createMcpHttpServer({ port: 0, token: TOKEN })
 	t.after(() => lifecycle.shutdown())
 	const { port } = await lifecycle.listen()
@@ -324,6 +324,18 @@ test("旧 HTTP+SSE 直接使用 Notion 配置的 /mcp 地址建立会话并调�
 	)
 	await waitFor(() => sse.messages.some((message) => message.id === 2), "SSE tools/list response did not arrive")
 	assert.equal(sse.messages.find((message) => message.id === 2).result.tools.length, 6)
+	const health = JSON.parse((await request(port, { path: "/healthz", method: "GET" })).body)
+	assert.equal(health.connections.legacySse, 1)
+	const log = await readFile(logFile, "utf8")
+	const records = log.trimEnd().split("\n").map(JSON.parse)
+	const opened = records.filter((record) => record.event === "sse_opened").at(-1)
+	const completed = records.filter((record) => record.transport === "legacy_sse_message" && record.event === "completed").at(-1)
+	assert.equal(opened.transport, "legacy_sse")
+	assert.equal(opened.legacySseSessions, 1)
+	assert.equal(completed.sseSession, opened.sseSession)
+	assert.equal(completed.messageCount, 3)
+	const sessionId = new URL(sse.endpoint, "http://localhost").searchParams.get("sessionId")
+	assert.doesNotMatch(log, new RegExp(sessionId))
 	assert.equal(
 		(await request(port, { path: "/mcp/messages?sessionId=missing", headers, body: JSON.stringify({}) })).status,
 		404,

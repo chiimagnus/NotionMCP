@@ -675,6 +675,7 @@ test("healthz 仅接受直连 loopback，并给每个 MCP 请求留下脱敏 tra
 			uptimeMs: JSON.parse(health.body).uptimeMs,
 			activeRequests: 0,
 			maxActiveRequests: 10,
+			connections: { open: 1, legacySse: 0 },
 			checks: { listener: "ready", acceptingRequests: "ready" },
 		},
 	)
@@ -695,10 +696,15 @@ test("healthz 仅接受直连 loopback，并给每个 MCP 请求留下脱敏 tra
 	assert.notEqual(rejectedTrace, completedTrace)
 
 	const records = (await readFile(join(httpFixture.dir, "http.log"), "utf8")).trimEnd().split("\n").map(JSON.parse)
+	const completedRecords = records.filter((record) => record.traceId === completedTrace)
 	assert.deepEqual(
-		records.filter((record) => record.traceId === completedTrace).map((record) => record.event),
+		completedRecords.map((record) => record.event),
 		["received", "authenticated", "queued", "started", "completed"],
 	)
+	assert.equal(completedRecords[0].transport, "streamable_http")
+	assert.equal(completedRecords[0].mcpProtocol, MCP_PROTOCOL_VERSION)
+	assert.equal(completedRecords[0].mcpMethod, "tools/list")
+	assert.equal(typeof completedRecords[0].connectionId, "number")
 	assert.deepEqual(
 		records.filter((record) => record.traceId === rejectedTrace).map((record) => record.event),
 		["received", "rejected"],
