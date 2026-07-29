@@ -127,16 +127,33 @@ test("现代 Streamable HTTP 探测、取消和后续请求互相隔离", async 
 	assert.equal(initial.status, 200)
 	assert.equal(JSON.parse(initial.body).result.tools.length, 6)
 	assert.equal(initial.headers["mcp-session-id"], undefined)
-	const rejectedLegacy = await request(port, {
+	const legacyInitialize = await request(port, {
+		headers: {
+			Authorization: `Bearer ${TOKEN}`,
+			Accept: "application/json, text/event-stream",
+			"Content-Type": "application/json",
+		},
+		body: JSON.stringify({
+			jsonrpc: "2.0",
+			id: 1,
+			method: "initialize",
+			params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "notion-legacy", version: "1.0" } },
+		}),
+	})
+	assert.equal(legacyInitialize.status, 200)
+	assert.match(legacyInitialize.headers["content-type"], /^text\/event-stream/)
+	assert.match(legacyInitialize.body, /"serverInfo":\{"name":"notionmcp"/)
+	const legacyToolsList = await request(port, {
 		headers: {
 			Authorization: `Bearer ${TOKEN}`,
 			Accept: "application/json, text/event-stream",
 			"Content-Type": "application/json",
 			"Mcp-Protocol-Version": "2025-03-26",
 		},
-		body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
+		body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} }),
 	})
-	assert.equal(rejectedLegacy.status, 400)
+	assert.equal(legacyToolsList.status, 200)
+	assert.match(legacyToolsList.body, /"name":"project_context"/)
 
 	const getProbe = await request(port, { method: "GET" })
 	assert.equal(getProbe.status, 405)
