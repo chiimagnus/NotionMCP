@@ -67,7 +67,7 @@ function request(port, { path = "/mcp", method = "POST", headers = {}, body = ""
 	})
 }
 
-function openSse(port, path = "/mcp") {
+function openSse(port, path = "/mcp/sse") {
 	return new Promise((resolve, reject) => {
 		const messages = []
 		let buffer = ""
@@ -97,6 +97,34 @@ function openSse(port, path = "/mcp") {
 					if (event === "endpoint" && data) resolve({ endpoint: data, messages, close: () => { req.destroy(); res.destroy() } })
 					if (event === "message" && data) messages.push(JSON.parse(data))
 				}
+			})
+			res.once("error", reject)
+		})
+		req.end()
+	})
+}
+
+function openStreamableSse(port) {
+	return new Promise((resolve, reject) => {
+		let buffer = ""
+		const req = http.request({
+			host: "127.0.0.1",
+			port,
+			path: "/mcp",
+			method: "GET",
+			headers: { Authorization: `Bearer ${TOKEN}`, Accept: "text/event-stream", "Mcp-Protocol-Version": MODERN_PROTOCOL_VERSION },
+		})
+		req.once("error", reject)
+		req.once("response", (res) => {
+			if (res.statusCode !== 200) {
+				reject(new Error(`SSE status ${res.statusCode}`))
+				res.resume()
+				return
+			}
+			res.setEncoding("utf8")
+			res.on("data", (chunk) => {
+				buffer += chunk
+				if (buffer.includes(": connected\n\n")) resolve({ headers: res.headers, close: () => { req.destroy(); res.destroy() } })
 			})
 			res.once("error", reject)
 		})
@@ -279,7 +307,32 @@ test("2026 Streamable HTTP 校验元数据和头部一致性", async (t) => {
 	assert.equal(invalidOrigin.status, 403)
 })
 
-test("旧 HTTP+SSE 直接使用 Notion 配置的 /mcp 地址建立会话并调用工具", async (t) => {
+test("2025 Streamable HTTP GET 保持轻量通知流，不创建旧 SSE 会话", async (t) => {
+	const { module, logFile } = await getFixture()
+	const lifecycle = module.createMcpHttpServer({ port: 0, token: TOKEN })
+	t.after(() => lifecycle.shutdown())
+	const { port } = await lifecycle.listen()
+
+	assert.equal(
+		(await request(port, { path: "/mcp", method: "GET", headers: { Accept: "text/event-stream" } })).status,
+		401,
+	)
+	const sse = await openStreamableSse(port)
+	t.after(sse.close)
+	assert.match(sse.headers["content-type"], /^text\/event-stream/)
+	assert.equal(lifecycle.legacySseCount, 0)
+	assert.equal(lifecycle.streamableSseCount, 1)
+	const health = JSON.parse((await request(port, { path: "/healthz", method: "GET" })).body)
+	assert.deepEqual(health.connections, { open: health.connections.open, legacySse: 0, streamableSse: 1, totalSse: 1 })
+	assert.equal((await modernRequest(port, MODERN_TOOLS_LIST)).status, 200)
+	const records = (await readFile(logFile, "utf8")).trimEnd().split("\n").map(JSON.parse)
+	const opened = records.findLast((record) => record.transport === "streamable_sse" && record.event === "sse_opened")
+	assert.equal(opened.streamableSseSessions, 1)
+	sse.close()
+	await waitFor(() => lifecycle.streamableSseCount === 0, "closed Streamable SSE did not leave the manager")
+})
+
+test("旧 HTTP+SSE 使用显式 /mcp/sse 会话入口并调用工具", async (t) => {
 	const { module, logFile } = await getFixture()
 	const lifecycle = module.createMcpHttpServer({ port: 0, token: TOKEN })
 	t.after(() => lifecycle.shutdown())
@@ -379,6 +432,32 @@ test("旧 HTTP+SSE 保留 Notion 打开的全部会话", async (t) => {
 		).status,
 		202,
 	)
+})
+
+test("SSE 总容量只拒绝新流，不关闭既有 Streamable 或旧 SSE 连接", async (t) => {
+	const { module } = await getFixture()
+	const lifecycle = module.createMcpHttpServer({ port: 0, token: TOKEN })
+	t.after(() => lifecycle.shutdown())
+	const { port } = await lifecycle.listen()
+	const sessions = []
+	for (let index = 0; index < 255; index += 1) sessions.push(await openStreamableSse(port))
+	t.after(() => sessions.forEach((session) => session.close()))
+	const legacy = await openSse(port)
+	t.after(legacy.close)
+	assert.equal(lifecycle.streamableSseCount, 255)
+	assert.equal(lifecycle.legacySseCount, 1)
+	const denied = await request(port, {
+		path: "/mcp",
+		method: "GET",
+		headers: { Authorization: `Bearer ${TOKEN}`, Accept: "text/event-stream" },
+	})
+	assert.equal(denied.status, 503)
+	assert.equal(denied.headers["retry-after"], "1")
+	const health = JSON.parse((await request(port, { path: "/healthz", method: "GET" })).body)
+	assert.equal(health.connections.streamableSse, 255)
+	assert.equal(health.connections.legacySse, 1)
+	assert.equal(health.sseHighWater, 256)
+	assert.equal((await modernRequest(port, MODERN_TOOLS_LIST)).status, 200)
 })
 
 test("旧 SSE message 与现代 POST 共享 FIFO 背压", async (t) => {

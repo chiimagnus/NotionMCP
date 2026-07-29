@@ -2,17 +2,22 @@ import assert from "node:assert/strict"
 import test from "node:test"
 
 import { runCommand, startService, stopService } from "../lib/service-manager.mjs"
-import { createTailscaleManager } from "../lib/tailscale.mjs"
+import { MCP_FUNNEL_PATHS, createTailscaleManager } from "../lib/tailscale.mjs"
 
 const PORT = 8123
 const TARGET = `http://127.0.0.1:${PORT}/mcp`
 const LEGACY_TARGET = `http://127.0.0.1:${PORT}`
+const TARGETS = Object.fromEntries(MCP_FUNNEL_PATHS.map((path) => [path, `http://127.0.0.1:${PORT}${path}`]))
 
-function status({ path = "/mcp", target = TARGET, allowed = true } = {}) {
+function status({ paths = MCP_FUNNEL_PATHS, targets = {}, allowed = true } = {}) {
 	return {
 		status: 0,
 		stdout: JSON.stringify({
-			Web: { "host.example.ts.net:443": { Handlers: path ? { [path]: { Proxy: target } } : {} } },
+			Web: {
+				"host.example.ts.net:443": {
+					Handlers: Object.fromEntries(paths.map((path) => [path, { Proxy: targets[path] || TARGETS[path] || TARGET }])),
+				},
+			},
 			AllowFunnel: { "host.example.ts.net:443": allowed },
 		}),
 		stderr: "",
@@ -42,8 +47,8 @@ test("Tailscale 状态区分正常、未登录、缺失、错误目标和超时"
 	for (const [result, expected] of [
 		[status(), "ready"],
 		[{ status: 1, stdout: "", stderr: "not logged in" }, "not_logged_in"],
-		[status({ path: null }), "missing"],
-		[status({ target: "http://127.0.0.1:9999" }), "wrong_target"],
+		[status({ paths: [] }), "missing"],
+		[status({ targets: { "/mcp": "http://127.0.0.1:9999" } }), "wrong_target"],
 		[{ status: null, stdout: "", stderr: "", timedOut: true }, "timeout"],
 	]) {
 		const runner = fakeRunner([result])
@@ -53,11 +58,15 @@ test("Tailscale 状态区分正常、未登录、缺失、错误目标和超时"
 	}
 })
 
-test("Funnel 只配置并精确关闭 /mcp", async () => {
+test("Funnel 只配置并精确关闭 MCP 的三条传输路径", async () => {
 	const runner = fakeRunner([
-		status({ path: "/", target: TARGET }),
+		status({ paths: ["/"] }),
+		{ status: 0, stdout: "", stderr: "" },
+		{ status: 0, stdout: "", stderr: "" },
 		{ status: 0, stdout: "", stderr: "" },
 		status(),
+		{ status: 0, stdout: "", stderr: "" },
+		{ status: 0, stdout: "", stderr: "" },
 		{ status: 0, stdout: "", stderr: "" },
 	])
 	const manager = createTailscaleManager({ path: "tailscale", run: runner.run })
@@ -67,15 +76,23 @@ test("Funnel 只配置并精确关闭 /mcp", async () => {
 	assert.deepEqual(runner.calls.map((call) => call.args), [
 		["funnel", "status", "--json"],
 		["funnel", "--bg", "--set-path=/mcp", TARGET],
+		["funnel", "--bg", "--set-path=/mcp/sse", TARGETS["/mcp/sse"]],
+		["funnel", "--bg", "--set-path=/mcp/messages", TARGETS["/mcp/messages"]],
 		["funnel", "status", "--json"],
 	])
 	await manager.disableMcpFunnel()
-	assert.deepEqual(runner.calls[3].args, ["funnel", "--set-path=/mcp", "off"])
+	assert.deepEqual(runner.calls.slice(5).map((call) => call.args), [
+		["funnel", "--set-path=/mcp/messages", "off"],
+		["funnel", "--set-path=/mcp/sse", "off"],
+		["funnel", "--set-path=/mcp", "off"],
+	])
 })
 
 test("历史 NotionMCP 目标会迁移到保留 /mcp 前缀的代理目标", async () => {
 	const runner = fakeRunner([
-		status({ target: LEGACY_TARGET }),
+		status({ targets: { "/mcp": LEGACY_TARGET } }),
+		{ status: 0, stdout: "", stderr: "" },
+		{ status: 0, stdout: "", stderr: "" },
 		{ status: 0, stdout: "", stderr: "" },
 		status(),
 	])
@@ -86,6 +103,8 @@ test("历史 NotionMCP 目标会迁移到保留 /mcp 前缀的代理目标", asy
 	assert.deepEqual(runner.calls.map((call) => call.args), [
 		["funnel", "status", "--json"],
 		["funnel", "--bg", "--set-path=/mcp", TARGET],
+		["funnel", "--bg", "--set-path=/mcp/sse", TARGETS["/mcp/sse"]],
+		["funnel", "--bg", "--set-path=/mcp/messages", TARGETS["/mcp/messages"]],
 		["funnel", "status", "--json"],
 	])
 })
@@ -93,7 +112,8 @@ test("历史 NotionMCP 目标会迁移到保留 /mcp 前缀的代理目标", asy
 test("已正确配置不改 Funnel；错误目标中止且不覆盖用户配置", async () => {
 	for (const [result, pattern] of [
 		[status(), null],
-		[status({ target: "http://127.0.0.1:9999" }), /已指向其他目标/],
+		[status({ targets: { "/mcp": "http://127.0.0.1:9999" } }), /已指向其他目标/],
+		[status({ targets: { "/mcp/sse": "http://127.0.0.1:9999" } }), /已指向其他目标/],
 	]) {
 		const runner = fakeRunner([result])
 		const manager = createTailscaleManager({ path: "tailscale", run: runner.run })
