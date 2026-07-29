@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
@@ -45,4 +45,41 @@ test("read_file 只读 UTF-8 普通文件，并校验范围、大小、二进制
 	const controller = new AbortController()
 	controller.abort()
 	assert.match((await call({ path: "text.txt" }, { signal: controller.signal })).content[0].text, /cancelled/)
+
+	const rulesRoot = join(dir, "rules")
+	const nested = join(rulesRoot, "nested")
+	const globalFile = join(dir, "global", "AGENTS.md")
+	await mkdir(join(dir, "global"), { recursive: true })
+	await mkdir(nested, { recursive: true })
+	await writeFile(globalFile, "global rule")
+	await writeFile(join(rulesRoot, "AGENTS.md"), "outer rule")
+	await writeFile(join(nested, "AGENTS.md"), "inner rule")
+	const agents = await import(`../lib/agentsMd.mjs?test=${Date.now()}-${Math.random()}`)
+	const hierarchy = await agents.getAgentsMdContext(nested, { globalFile })
+	assert.deepEqual(hierarchy.sources.map((source) => source.content), ["global rule", "outer rule", "inner rule"])
+	assert.match(agents.formatAgentsMdContext(hierarchy), /digest: sha256:/)
+	assert.match(await agents.getChangedAgentsMdBlock(nested, { globalFile }), /inner rule/)
+	assert.equal(await agents.getChangedAgentsMdBlock(nested, { globalFile }), "")
+	await writeFile(join(nested, "AGENTS.md"), "inner rule changed")
+	assert.match(await agents.getChangedAgentsMdBlock(nested, { globalFile }), /inner rule changed/)
+	await mkdir(join(rulesRoot, "invalid"), { recursive: true })
+	await writeFile(join(rulesRoot, "invalid", "AGENTS.md"), Buffer.from([0xc3, 0x28]))
+	const invalid = await agents.getAgentsMdContext(join(rulesRoot, "invalid"), { globalFile })
+	assert.equal(invalid.warnings.some((warning) => warning.reason === "unreadable"), true)
+	await mkdir(join(rulesRoot, "oversized"), { recursive: true })
+	await writeFile(join(rulesRoot, "oversized", "AGENTS.md"), "x".repeat(128 * 1024 + 1))
+	const oversized = await agents.getAgentsMdContext(join(rulesRoot, "oversized"), { globalFile })
+	assert.equal(oversized.warnings.some((warning) => warning.reason === "too_large"), true)
+	const cancelled = new AbortController()
+	cancelled.abort()
+	assert.equal((await agents.getAgentsMdContext(nested, { globalFile, signal: cancelled.signal })).cancelled, true)
+
+	const projectContext = await import(`../tools/project_context.mjs?test=${Date.now()}-${Math.random()}`)
+	assert.match((await projectContext.call({ cwd: nested })).content[0].text, /inner rule changed/)
+	const runCommand = await import(`../tools/run_command.mjs?test=${Date.now()}-${Math.random()}`)
+	assert.doesNotMatch((await runCommand.call({ command: "printf context", cwd: nested })).content[0].text, /auto-loaded dev conventions/)
+	await writeFile(join(nested, "AGENTS.md"), "inner rule changed again")
+	assert.match((await runCommand.call({ command: "printf context", cwd: nested })).content[0].text, /inner rule changed again/)
+	assert.doesNotMatch((await runCommand.call({ command: "printf context", cwd: nested })).content[0].text, /auto-loaded dev conventions/)
+	assert.doesNotMatch(await readFile(join(dir, "mcp.log"), "utf8"), /inner rule changed again/)
 })

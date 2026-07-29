@@ -9,8 +9,9 @@ import * as readImage from "./read_image.mjs"
 import * as applyPatch from "./apply_patch.mjs"
 import * as loadSkills from "./load_skills.mjs"
 import * as readFile from "./read_file.mjs"
+import * as projectContext from "./project_context.mjs"
 
-const modules = [runCommand, readImage, applyPatch, loadSkills, readFile]
+const modules = [runCommand, readImage, applyPatch, loadSkills, readFile, projectContext]
 
 export const definitions = modules.map((m) => m.definition)
 
