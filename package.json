@@ -1,6 +1,6 @@
 {
 	"name": "notionmcp",
-	"version": "2.0.0",
+	"version": "3.0.0",
 	"private": true,
 	"type": "module",
 	"description": "把本地文件夹通过原生鉴权 Streamable HTTP + Tailscale Funnel 暴露成 MCP server。",
@@ -13,7 +13,7 @@
 		"doctor": "node bin/notionmcp.mjs doctor",
 		"test": "node --test test/lifecycle.test.mjs test/transport.test.mjs test/service-manager.test.mjs test/doctor.test.mjs test/platform-services.test.mjs test/tools.test.mjs",
 		"test:soak": "node --expose-gc test/soak.mjs",
-		"build": "node --check bin/notionmcp.mjs && node --check lib/up.mjs && node --check lib/mcp-http.mjs && node --check lib/service-manager.mjs && node --check lib/tailscale.mjs && node --check lib/doctor.mjs && node --check lib/platform-services.mjs && node --check lib/agentsMd.mjs && node --check tools/read_file.mjs && node --check tools/project_context.mjs && node --check tools/load_skills.mjs && node --check tools/search_skills.mjs"
+		"build": "node --check bin/notionmcp.mjs && node --check lib/up.mjs && node --check lib/mcp-http.mjs && node --check lib/service-manager.mjs && node --check lib/tailscale.mjs && node --check lib/doctor.mjs && node --check lib/platform-services.mjs && node --check lib/agentsMd.mjs && node --check tools/read_file.mjs && node --check tools/project_context.mjs && node --check tools/load_skills.mjs"
 	},
 	"dependencies": {
 		"@modelcontextprotocol/sdk": "^1.30.0",

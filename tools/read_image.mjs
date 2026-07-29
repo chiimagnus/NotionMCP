@@ -26,9 +26,9 @@ const RASTERIZER_TIMEOUT_MS = 30_000
 
 export const definition = {
 	name,
-	title: "读取图片",
+	title: "读取图片（只读）",
 	description:
-		"读取一个图片文件，并把它作为可查看的图像内容返回（而不只是原始字节或标记文本），这样调用方模型才能真正“看到”这张图。默认会把图片缩放到 maxSize 以内以节省 token（位图和 SVG 都适用）；传 detail: \"original\" 可以跳过缩放、拿到原始分辨率。SVG 文件会先通过平台上的栅格化工具转成 PNG：macOS 使用 qlmanage，Linux/Windows 使用 ImageMagick（magick）或 rsvg-convert；位图缩放失败时会自动降级为返回原图，不报错。相对路径会基于沙盒文件夹（" +
+		"只读地读取一个图片文件，并把它作为可查看的图像内容返回（而不只是原始字节或标记文本）；在 Notion 中可设为“自动运行”。默认会把图片缩放到 maxSize 以内以节省 token（位图和 SVG 都适用）；传 detail: \"original\" 可以跳过缩放、拿到原始分辨率。SVG 文件会先通过平台上的栅格化工具转成 PNG：macOS 使用 qlmanage，Linux/Windows 使用 ImageMagick（magick）或 rsvg-convert；位图缩放失败时会自动降级为返回原图，不报错。相对路径会基于沙盒文件夹（" +
 		SANDBOX_DIR +
 		"）解析；也支持绝对路径。",
 	inputSchema: {
