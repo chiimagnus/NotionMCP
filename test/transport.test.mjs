@@ -340,6 +340,9 @@ test("旧 HTTP+SSE 直接使用 Notion 配置的 /mcp 地址建立会话并调�
 		(await request(port, { path: "/mcp/messages?sessionId=missing", headers, body: JSON.stringify({}) })).status,
 		404,
 	)
+	sse.close()
+	await waitFor(() => lifecycle.legacySseCount === 0, "closed SSE session did not leave the manager")
+	assert.equal(JSON.parse((await request(port, { path: "/healthz", method: "GET" })).body).connections.legacySse, 0)
 })
 
 test("旧 HTTP+SSE 保留 Notion 打开的全部会话", async (t) => {
