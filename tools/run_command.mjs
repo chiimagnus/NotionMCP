@@ -15,7 +15,6 @@ import { SANDBOX_DIR, DEFAULT_TIMEOUT_MS, MAX_OUTPUT_CHARS, MAX_TIMEOUT_MS } fro
 import { log } from "../lib/log.mjs"
 import { registerChild, terminateProcessTree, unregisterChild } from "../lib/process-tree.mjs"
 import { resolvePath } from "../lib/paths.mjs"
-import { getAgentsMdBlock } from "../lib/agentsMd.mjs"
 
 // ponytail: 查一次 pwsh.exe 的位置：先查 PATH，再查 PowerShell 7 MSI 的固定安装目录。
 // 这个函数本身只做“查找”，不在模块加载时（import 阶段）调用——找不到 pwsh 时
@@ -81,11 +80,11 @@ export const name = "run_command"
 
 export const definition = {
 	name,
-	title: "执行命令",
+	title: "Run Command",
 	description:
 		`在这台机器上通过 ${SHELL_LABEL} 执行一条命令。默认工作目录是 ` +
 		SANDBOX_DIR +
-		"。注意：这不是一个严格的沙盒环境——命令仍然可以访问工作目录之外的路径（例如绝对路径、切换目录等）。可用于运行 python/pip、编辑文件、生成图片/SVG、跑训练脚本，以及其他任意命令行任务。\n\n" +
+		"。命令可能读取、修改或删除文件，也可能启动进程；在 Notion 中应设为“始终询问”。注意：这不是一个严格的沙盒环境——命令仍然可以访问工作目录之外的路径（例如绝对路径、切换目录等）。\n\n" +
 		RUN_COMMAND_GUIDANCE,
 	inputSchema: {
 		type: "object",
@@ -175,6 +174,10 @@ function runCommand({ command, cwd, timeoutMs }, { signal } = {}) {
 		}
 		if (signal?.aborted) {
 			finishEarly({ code: -1, stdout: "", stderr: "Command cancelled", timedOut: false, cancelled: true })
+			return
+		}
+		if (cwd !== undefined && typeof cwd !== "string") {
+			finishEarly({ code: -1, stdout: "", stderr: "cwd must be a string", timedOut: false, cancelled: false })
 			return
 		}
 		let shell
@@ -309,15 +312,12 @@ function runCommand({ command, cwd, timeoutMs }, { signal } = {}) {
 }
 
 export async function call(args, context = {}) {
-	const cwdArg = args && args.cwd
-	const workDir = cwdArg ? resolvePath(cwdArg) : SANDBOX_DIR
 	const result = await runCommand(args || {}, context)
-	const agentsMdBlock = getAgentsMdBlock(workDir)
 	const status = result.timedOut
 		? " (timed out, process killed)"
 		: result.cancelled
 			? " (cancelled, process killed)"
 			: ""
-	const text = `exit code: ${result.code}${status}\n\n--- stdout ---\n${result.stdout}\n\n--- stderr ---\n${result.stderr}${agentsMdBlock}`
-	return { content: [{ type: "text", text }] }
+	const text = `exit code: ${result.code}${status}\n\n--- stdout ---\n${result.stdout}\n\n--- stderr ---\n${result.stderr}`
+	return { content: [{ type: "text", text }], isError: result.code === -1 }
 }

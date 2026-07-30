@@ -10,15 +10,14 @@ import { dirname } from "node:path"
 import { setImmediate as yieldToEventLoop } from "node:timers/promises"
 import { resolvePath } from "../lib/paths.mjs"
 import { log } from "../lib/log.mjs"
-import { getAgentsMdBlock } from "../lib/agentsMd.mjs"
 
 export const name = "apply_patch"
 
 export const definition = {
 	name,
-	title: "编辑文件",
+	title: "Edit Files",
 	description:
-		'通过 operations 数组批量新建、修改或删除文件。操作格式：create_file 使用 { type, path, content, overwrite? }；update_file 使用 { type, path, edits: [{ oldStr, newStr, replaceAll? }] }；delete_file 使用 { type, path }。完整修改示例：{"operations":[{"type":"update_file","path":"notes.txt","edits":[{"oldStr":"旧文本","newStr":"新文本"}]}]}。operations 按顺序执行，每项独立返回结果；某项失败不会回滚其他已完成项。oldStr 必须唯一匹配，除非设置 replaceAll。相对路径基于沙盒文件夹解析，也支持绝对路径——和 run_command 一样，这不是一个严格的沙盒边界。',
+		'写入工具：通过 operations 数组批量新建、修改或删除文件。操作格式：create_file 使用 { type, path, content, overwrite? }；update_file 使用 { type, path, edits: [{ oldStr, newStr, replaceAll? }] }；delete_file 使用 { type, path }。完整修改示例：{"operations":[{"type":"update_file","path":"notes.txt","edits":[{"oldStr":"旧文本","newStr":"新文本"}]}]}。operations 按顺序执行，每项独立返回结果；某项失败不会回滚其他已完成项。oldStr 必须唯一匹配，除非设置 replaceAll。相对路径基于沙盒文件夹解析，也支持绝对路径——和 run_command 一样，这不是一个严格的沙盒边界。',
 	inputSchema: {
 		type: "object",
 		properties: {
@@ -157,7 +156,5 @@ export async function call(args, context = {}) {
 		.map((r) => `[${r.status}] ${r.type} ${r.path}${r.output ? ` \u2014 ${r.output}` : ""}`)
 		.join("\n")
 	const hasFailure = results.some((r) => r.status === "failed")
-	const firstPath = operations[0] && operations[0].path
-	const agentsMdBlock = firstPath && !context.signal?.aborted ? getAgentsMdBlock(dirname(resolvePath(firstPath))) : ""
-	return { content: [{ type: "text", text: text + agentsMdBlock }], isError: hasFailure }
+	return { content: [{ type: "text", text }], isError: hasFailure }
 }

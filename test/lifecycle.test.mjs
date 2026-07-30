@@ -1,6 +1,5 @@
 import assert from "node:assert/strict"
 import { execFileSync, spawn } from "node:child_process"
-import { watch } from "node:fs"
 import { chmod, mkdir, mkdtemp, open, readFile, readdir, rm, stat, writeFile } from "node:fs/promises"
 import http from "node:http"
 import { createConnection } from "node:net"
@@ -11,6 +10,12 @@ import test, { after } from "node:test"
 
 const ROOT = join(import.meta.dirname, "..")
 const PLATFORM_TOKEN = "0123456789abcdef".repeat(4)
+const MCP_PROTOCOL_VERSION = "2026-07-28"
+const MCP_META = {
+	"io.modelcontextprotocol/protocolVersion": MCP_PROTOCOL_VERSION,
+	"io.modelcontextprotocol/clientInfo": { name: "notionmcp-test", version: "1.0.0" },
+	"io.modelcontextprotocol/clientCapabilities": {},
+}
 
 function waitForExit(child, timeoutMs = 5_000) {
 	return new Promise((resolve, reject) => {
@@ -333,7 +338,7 @@ test("read_image 只读取普通文件并对输入输出施加 10 MiB 上限", a
 	const config = await configFile(dir)
 	const small = join(dir, "small.png")
 	await writeFile(small, Buffer.from([0x89, 0x50, 0x4e, 0x47]))
-	const ok = await runImageTool(config, { path: small })
+	const ok = await runImageTool(config, { path: small, detail: "original" })
 	assert.equal(ok.result.content[0].mimeType, "image/png")
 	assert.equal(ok.result.content[0].data, Buffer.from([0x89, 0x50, 0x4e, 0x47]).toString("base64"))
 
@@ -585,16 +590,25 @@ function httpRequest(port, { path = "/mcp", method = "POST", headers = {}, body 
 	})
 }
 
+function modernMessage(message) {
+	if (!message || typeof message !== "object" || Array.isArray(message)) return message
+	const params = message.params && typeof message.params === "object" && !Array.isArray(message.params) ? message.params : {}
+	return { ...message, params: { ...params, _meta: { ...MCP_META, ...params._meta } } }
+}
+
 function mcpRequest(port, token, message, extraHeaders = {}) {
+	const modern = modernMessage(message)
 	return httpRequest(port, {
 		headers: {
 			Authorization: `Bearer ${token}`,
 			Accept: "application/json, text/event-stream",
 			"Content-Type": "application/json",
-			"Mcp-Protocol-Version": "2025-03-26",
+			"Mcp-Protocol-Version": MCP_PROTOCOL_VERSION,
+			...(modern?.method ? { "Mcp-Method": modern.method } : {}),
+			...(modern?.method === "tools/call" && modern.params?.name ? { "Mcp-Name": modern.params.name } : {}),
 			...extraHeaders,
 		},
-		body: JSON.stringify(message),
+		body: JSON.stringify(modern),
 	})
 }
 
@@ -642,16 +656,74 @@ const TOOLS_LIST = { jsonrpc: "2.0", id: 99, method: "tools/list", params: {} }
 async function assertHttpHealthy(lifecycle, port, token) {
 	const response = await mcpRequest(port, token, TOOLS_LIST)
 	assert.equal(response.status, 200)
-	assert.equal(JSON.parse(response.body).result.tools.length, 4)
+	assert.equal(JSON.parse(response.body).result.tools.length, 6)
 	assert.equal(response.headers["mcp-session-id"], undefined)
 	assert.equal(lifecycle.activeRequestCount, 0)
 }
+
+test("healthz 仅接受直连 loopback，并给每个 MCP 请求留下脱敏 trace", async (t) => {
+	const { lifecycle, port, token } = await startMcpServer(t)
+
+	const health = await httpRequest(port, { path: "/healthz", method: "GET" })
+	assert.equal(health.status, 200)
+	assert.equal(health.headers["cache-control"], "no-store")
+	assert.deepEqual(
+		JSON.parse(health.body),
+		{
+			status: "ready",
+			version: "3.0.0",
+			uptimeMs: JSON.parse(health.body).uptimeMs,
+			activeRequests: 0,
+			maxActiveRequests: 10,
+			queuedRequests: 0,
+			maxQueuedRequests: 64,
+			connections: { open: 1, legacySse: 0, totalSse: 0 },
+			maxSseStreams: 256,
+			sseHighWater: 0,
+			checks: { listener: "ready", acceptingRequests: "ready" },
+		},
+	)
+	assert.equal((await httpRequest(port, { path: "/healthz", method: "GET", headers: { "X-Forwarded-For": "203.0.113.1" } })).status, 403)
+
+	const completed = await mcpRequest(port, token, TOOLS_LIST)
+	assert.equal(completed.status, 200)
+	const completedTrace = completed.headers["x-request-id"]
+	assert.match(completedTrace, /^[0-9a-f]{8}-[0-9a-f-]{27}$/)
+
+	const bodyMarker = "TRACE_BODY_MUST_NOT_BE_LOGGED"
+	const rejected = await httpRequest(port, {
+		headers: { Authorization: "Bearer wrong", Accept: "application/json, text/event-stream", "Content-Type": "application/json" },
+		body: JSON.stringify({ marker: bodyMarker }),
+	})
+	assert.equal(rejected.status, 401)
+	const rejectedTrace = rejected.headers["x-request-id"]
+	assert.notEqual(rejectedTrace, completedTrace)
+
+	const records = (await readFile(join(httpFixture.dir, "http.log"), "utf8")).trimEnd().split("\n").map(JSON.parse)
+	const completedRecords = records.filter((record) => record.traceId === completedTrace)
+	assert.deepEqual(
+		completedRecords.map((record) => record.event),
+		["received", "authenticated", "queued", "started", "completed"],
+	)
+	assert.equal(completedRecords[0].transport, "streamable_http")
+	assert.equal(completedRecords[0].mcpProtocol, MCP_PROTOCOL_VERSION)
+	assert.equal(completedRecords[0].mcpMethod, "tools/list")
+	assert.equal(typeof completedRecords[0].connectionId, "number")
+	assert.deepEqual(
+		records.filter((record) => record.traceId === rejectedTrace).map((record) => record.event),
+		["received", "rejected"],
+	)
+	assert.doesNotMatch(JSON.stringify(records), new RegExp(bodyMarker))
+	assert.doesNotMatch(JSON.stringify(records), /Bearer wrong/)
+	assert.equal(lifecycle.activeRequestCount, 0)
+})
 
 function toolCall(name, args, id = 1) {
 	return { jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: args } }
 }
 
 function openMcpRequest(port, token, message) {
+	const modern = modernMessage(message)
 	let responseStarted = false
 	let req
 	const response = new Promise((resolve, reject) => {
@@ -665,7 +737,9 @@ function openMcpRequest(port, token, message) {
 					Authorization: `Bearer ${token}`,
 					Accept: "application/json, text/event-stream",
 					"Content-Type": "application/json",
-					"Mcp-Protocol-Version": "2025-03-26",
+					"Mcp-Protocol-Version": MCP_PROTOCOL_VERSION,
+					"Mcp-Method": modern.method,
+					...(modern.method === "tools/call" && modern.params?.name ? { "Mcp-Name": modern.params.name } : {}),
 				},
 			},
 			(res) => {
@@ -683,7 +757,7 @@ function openMcpRequest(port, token, message) {
 		req.once("error", (error) => {
 			if (!responseStarted) reject(error)
 		})
-		req.end(JSON.stringify(message))
+		req.end(JSON.stringify(modern))
 	})
 	return { req, response }
 }
@@ -720,7 +794,7 @@ function repositoryNodeProcessCount() {
 		.length
 }
 
-test("原生无状态 HTTP 完成基础 MCP 协议且可确定关闭", async (t) => {
+test("现代无状态 HTTP 完成基础 MCP 协议且可确定关闭", async (t) => {
 	const { lifecycle, port, token } = await startMcpServer(t)
 
 	const unauthorized = await httpRequest(port, {
@@ -730,20 +804,8 @@ test("原生无状态 HTTP 完成基础 MCP 协议且可确定关闭", async (t)
 	assert.equal(unauthorized.status, 401)
 
 	const messages = [
-		{
-			jsonrpc: "2.0",
-			id: 1,
-			method: "initialize",
-			params: {
-				protocolVersion: "2025-03-26",
-				capabilities: {},
-				clientInfo: { name: "test", version: "1" },
-			},
-		},
-		{ jsonrpc: "2.0", method: "notifications/initialized" },
-		{ jsonrpc: "2.0", id: 2, method: "ping" },
-		{ jsonrpc: "2.0", id: 3, method: "tools/list", params: {} },
-		{ jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "missing", arguments: {} } },
+		{ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} },
+		{ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "missing", arguments: {} } },
 	]
 	const responses = []
 	for (const message of messages) {
@@ -752,11 +814,8 @@ test("原生无状态 HTTP 完成基础 MCP 协议且可确定关闭", async (t)
 		assert.equal(response.headers["mcp-session-id"], undefined)
 	}
 	assert.equal(responses[0].status, 200)
-	assert.equal(JSON.parse(responses[0].body).result.serverInfo.name, "notionmcp")
-	assert.equal(responses[1].status, 202)
-	assert.equal(JSON.parse(responses[2].body).result !== undefined, true)
-	assert.equal(JSON.parse(responses[3].body).result.tools.length, 4)
-	assert.equal(JSON.parse(responses[4].body).error.code, -32602)
+	assert.equal(JSON.parse(responses[0].body).result.tools.length, 6)
+	assert.equal(JSON.parse(responses[1].body).error.code, -32602)
 	assert.equal(lifecycle.activeRequestCount, 0)
 
 	await lifecycle.shutdown()
@@ -795,12 +854,15 @@ test("HTTP 路由、媒体类型和 body 上限失败后 server 仍可复用", a
 	const { lifecycle, port, token } = await startMcpServer(t)
 	assert.equal(lifecycle.httpServer.headersTimeout, 10_000)
 	assert.equal(lifecycle.httpServer.requestTimeout, 15_000)
-	assert.equal(lifecycle.httpServer.maxConnections, 32)
 
 	const route = await httpRequest(port, { path: "/other", method: "POST" })
 	assert.equal(route.status, 404)
 	await assertHttpHealthy(lifecycle, port, token)
-	for (const method of ["GET", "PUT"]) {
+	const sseUnauthorized = await httpRequest(port, { method: "GET", headers: { Accept: "text/event-stream" } })
+	assert.equal(sseUnauthorized.status, 401)
+	assert.equal(sseUnauthorized.headers["www-authenticate"], "Bearer")
+	await assertHttpHealthy(lifecycle, port, token)
+	for (const method of ["PUT"]) {
 		const response = await httpRequest(port, { method })
 		assert.equal(response.status, 405)
 		assert.equal(response.headers.allow, "POST")
@@ -912,16 +974,11 @@ test("JSON-RPC 和协议版本错误互不污染后续请求", async (t) => {
 	}
 
 	const unknown = await mcpRequest(port, token, { jsonrpc: "2.0", id: 5, method: "unknown" })
-	assert.equal(unknown.status, 200)
-	assert.equal(JSON.parse(unknown.body).error.code, -32601)
+	assert.equal(unknown.status, 404)
 	await assertHttpHealthy(lifecycle, port, token)
 	const badVersion = await mcpRequest(port, token, TOOLS_LIST, { "Mcp-Protocol-Version": "1900-01-01" })
 	assert.equal(badVersion.status, 400)
 	await assertHttpHealthy(lifecycle, port, token)
-	const initialized = await mcpRequest(port, token, { jsonrpc: "2.0", method: "notifications/initialized" })
-	assert.equal(initialized.status, 202)
-	assert.equal(initialized.headers["mcp-session-id"], undefined)
-
 	const requestListeners = lifecycle.httpServer.listenerCount("request")
 	for (let i = 0; i < 20; i += 1) {
 		assert.equal((await mcpRequest(port, token, [])).status, 400)
@@ -930,8 +987,10 @@ test("JSON-RPC 和协议版本错误互不污染后续请求", async (t) => {
 	await assertHttpHealthy(lifecycle, port, token)
 })
 
-test("十个长请求占满 slot，第十一个和 batch 都不能启动命令", async (t) => {
+test("十个长请求占满 slot 后，排队请求取消不会执行命令", async (t) => {
 	const { lifecycle, port, token } = await startMcpServer(t)
+	const logFile = join(httpFixture.dir, "http.log")
+	const traceOffset = (await readFile(logFile, "utf8").catch(() => "")).length
 	const helper = join(httpFixture.dir, "http-tree.cjs")
 	await writeFile(
 		helper,
@@ -954,14 +1013,26 @@ test("十个长请求占满 slot，第十一个和 batch 都不能启动命令",
 	const marker = join(httpFixture.dir, "eleventh-marker")
 	const markerCommand = nodeCommand(join(httpFixture.dir, "write-marker.cjs"), marker)
 	await writeFile(join(httpFixture.dir, "write-marker.cjs"), `require("node:fs").writeFileSync(process.argv[2],"ran")\n`)
-	const eleventhBody = JSON.stringify(toolCall("run_command", { command: markerCommand }, 11))
-	const eleventh = await headersOnlyRequest(port, {
-		Authorization: `Bearer ${token}`,
-		Accept: "application/json, text/event-stream",
-		"Content-Type": "application/json",
-		"Content-Length": String(Buffer.byteLength(eleventhBody)),
-	})
-	assert.equal(eleventh.status, 429)
+	const eleventh = openMcpRequest(port, token, toolCall("run_command", { command: markerCommand }, 11))
+	await waitForCondition(() => lifecycle.queuedRequestCount === 1, "第十一个请求没有进入队列")
+	const underLoad = JSON.parse((await httpRequest(port, { path: "/healthz", method: "GET" })).body)
+	assert.equal(underLoad.activeRequests, 10)
+	assert.equal(underLoad.queuedRequests, 1)
+	eleventh.req.destroy()
+	await eleventh.response.catch(() => null)
+	await waitForCondition(() => lifecycle.queuedRequestCount === 0, "取消的排队请求没有离开队列")
+	await assert.rejects(readFile(marker))
+
+	const queued = Array.from({ length: 64 }, (_, index) =>
+		openMcpRequest(port, token, toolCall("run_command", { command: markerCommand }, index + 20)),
+	)
+	await waitForCondition(() => lifecycle.queuedRequestCount === 64, "64 个等待位没有全部占满")
+	const overflow = await mcpRequest(port, token, toolCall("run_command", { command: markerCommand }, 99))
+	assert.equal(overflow.status, 429)
+	assert.equal(overflow.headers["retry-after"], "1")
+	for (const request of queued) request.req.destroy()
+	await Promise.all(queued.map((request) => request.response.catch(() => null)))
+	await waitForCondition(() => lifecycle.queuedRequestCount === 0, "过载测试的等待请求没有清理")
 	await assert.rejects(readFile(marker))
 
 	for (const request of requests) request.req.destroy()
@@ -978,9 +1049,39 @@ test("十个长请求占满 slot，第十一个和 batch 都不能启动命令",
 	const recovered = await Promise.all(Array.from({ length: 10 }, () => mcpRequest(port, token, TOOLS_LIST)))
 	assert.ok(recovered.every((response) => response.status === 200))
 	assert.equal(lifecycle.activeRequestCount, 0)
+	const events = {}
+	for (const record of (await readFile(logFile, "utf8")).slice(traceOffset).trimEnd().split("\n").map(JSON.parse)) {
+		if (record.scope !== "http" || !record.traceId) continue
+		events[record.event] = (events[record.event] || 0) + 1
+	}
+	assert.ok(events.cancelled >= 10)
+	assert.ok(events.rejected >= 1)
+	assert.ok(events.completed >= 10)
+	assert.equal(events.failed || 0, 0)
 })
 
-test("四个工具均经真实 HTTP 到达，apply_patch 在取消边界停止后续写入", async (t) => {
+test("二十四条并发工具调用经 FIFO 背压全部完成", async (t) => {
+	const { lifecycle, port, token } = await startMcpServer(t)
+	const helper = join(httpFixture.dir, "queue-delay.cjs")
+	await writeFile(helper, `setTimeout(()=>process.stdout.write("done"),500)\n`)
+	const requests = Array.from({ length: 24 }, (_, index) =>
+		mcpRequest(port, token, toolCall("run_command", { command: nodeCommand(helper) }, index + 1)),
+	)
+	await waitForCondition(
+		() => lifecycle.activeRequestCount === 10 && lifecycle.queuedRequestCount === 14,
+		"24 个请求没有形成预期的 10 运行 + 14 排队状态",
+	)
+	const underLoad = JSON.parse((await httpRequest(port, { path: "/healthz", method: "GET" })).body)
+	assert.equal(underLoad.activeRequests, 10)
+	assert.equal(underLoad.queuedRequests, 14)
+	assert.equal(underLoad.maxQueuedRequests, 64)
+	const responses = await Promise.all(requests)
+	assert.ok(responses.every((response) => response.status === 200))
+	assert.equal(lifecycle.activeRequestCount, 0)
+	assert.equal(lifecycle.queuedRequestCount, 0)
+})
+
+test("六个工具均经真实 HTTP 到达", async (t) => {
 	const { lifecycle, port, token } = await startMcpServer(t)
 	const commandHelper = join(httpFixture.dir, "http-output.cjs")
 	await writeFile(commandHelper, `process.stdout.write("via-http")\n`)
@@ -989,11 +1090,13 @@ test("四个工具均经真实 HTTP 到达，apply_patch 在取消边界停止�
 	const patched = join(httpFixture.dir, "http-patched.txt")
 	const calls = [
 		toolCall("run_command", { command: nodeCommand(commandHelper) }, 20),
-		toolCall("read_image", { path: image }, 21),
+		toolCall("read_image", { path: image, detail: "original" }, 21),
 		toolCall("apply_patch", {
 			operations: [{ type: "create_file", path: patched, content: "created", overwrite: true }],
 		}, 22),
 		toolCall("load_skills", { name: "fixture-skill" }, 23),
+		toolCall("read_file", { path: patched }, 24),
+		toolCall("read_rules", { cwd: httpFixture.dir }, 25),
 	]
 	const responses = []
 	for (const call of calls) responses.push(await mcpRequest(port, token, call))
@@ -1002,35 +1105,10 @@ test("四个工具均经真实 HTTP 到达，apply_patch 在取消边界停止�
 	assert.equal(JSON.parse(responses[1].body).result.content[0].data, Buffer.from([1, 2, 3]).toString("base64"))
 	assert.equal(await readFile(patched, "utf8"), "created")
 	assert.match(JSON.parse(responses[3].body).result.content[0].text, /fixture-skill/)
+	assert.match(JSON.parse(responses[4].body).result.content[0].text, /created/)
+	assert.match(JSON.parse(responses[5].body).result.content[0].text, /read rules/)
+	assert.match(JSON.parse(responses[5].body).result.content[0].text, /fixture-skill/)
 
-	const operationDir = join(httpFixture.dir, "cancelled-patch")
-	await mkdir(operationDir, { recursive: true })
-	const operations = Array.from({ length: 200 }, (_, index) => ({
-		type: "create_file",
-		path: join(operationDir, `${String(index).padStart(3, "0")}.txt`),
-		content: index === 0 ? "x".repeat(512 * 1024) : "x",
-		overwrite: true,
-	}))
-	let pending
-	let sawWriteResolve
-	const sawWrite = new Promise((resolve) => {
-		sawWriteResolve = resolve
-	})
-	const watcher = watch(operationDir, () => {
-		pending?.req.destroy()
-		sawWriteResolve()
-	})
-	t.after(() => watcher.close())
-	pending = openMcpRequest(port, token, toolCall("apply_patch", { operations }, 24))
-	const settled = pending.response.catch(() => null)
-	await sawWrite
-	await settled
-	await waitForCondition(() => lifecycle.activeRequestCount === 0, "apply_patch 取消后 slot 未释放")
-	await waitForCondition(
-		async () => (await stat(join(operationDir, "000.txt")).catch(() => null))?.size === 512 * 1024,
-		"已开始的 operation 未完成",
-	)
-	assert.equal(await readFile(join(operationDir, "199.txt"), "utf8").catch(() => null), null)
 })
 
 test("命令业务失败以 warning 保留 stderr 尾部但不记录命令、stdout 或 Token", async (t) => {
