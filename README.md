@@ -1,5 +1,7 @@
 # NotionMCP
 
+[English](./README.en.md) | 中文
+
 把电脑暴露成一个mcp服务，供Notion AI（后续会支持ChatGPT吧？）使用，提供下面这五个工具：
 
 - `read_rules` —— 读取项目规则和所有可用技能清单
