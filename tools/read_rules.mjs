@@ -12,7 +12,7 @@ export const name = "read_rules"
 export const definition = {
 	name,
 	title: "Read Rules",
-	description: "只读地加载全局 ~/.codex/AGENTS.md、当前项目从外到内的 AGENTS.md，以及所有可用 skills 的 key、SKILL.md 路径、name、description。返回规则来源与 digest；开始开发任务时先调用，随后用 read_file 按需读取技能正文。",
+	description: "只读地加载全局 ~/.codex/AGENTS.md、当前项目从外到内的 AGENTS.md，以及所有可用 skills 的 key、SKILL.md 路径、name、description。开始开发任务时先调用，随后用 read_file 按需读取技能正文。",
 	inputSchema: {
 		type: "object",
 		properties: {
