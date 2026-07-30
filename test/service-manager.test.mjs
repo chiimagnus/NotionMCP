@@ -126,12 +126,60 @@ test("历史 NotionMCP 目标会迁移到保留 /mcp 前缀的代理目标", asy
 	])
 })
 
+test("迁移旧 /mcp 目标前也会清理同属本项目的根路径", async () => {
+	const runner = fakeRunner([
+		status({ paths: ["/", ...MCP_FUNNEL_PATHS], targets: { "/mcp": LEGACY_TARGET } }),
+		{ status: 0, stdout: "", stderr: "" },
+		status({ paths: MCP_FUNNEL_PATHS, targets: { "/mcp": LEGACY_TARGET } }),
+		{ status: 0, stdout: "", stderr: "" },
+		{ status: 0, stdout: "", stderr: "" },
+		{ status: 0, stdout: "", stderr: "" },
+		status({ paths: MCP_FUNNEL_PATHS }),
+	])
+	const manager = createTailscaleManager({ path: "tailscale", run: runner.run })
+	const configured = await manager.ensureMcpFunnel(PORT)
+	assert.equal(configured.changed, true)
+	assert.equal(configured.status.publicUrl, "https://host.example.ts.net:443/mcp")
+	assert.deepEqual(runner.calls.map((call) => call.args), [
+		["funnel", "status", "--json"],
+		["funnel", "--set-path=/", "off"],
+		["funnel", "status", "--json"],
+		["funnel", "--bg", "--set-path=/mcp", TARGET],
+		["funnel", "--bg", "--set-path=/mcp/sse", TARGETS["/mcp/sse"]],
+		["funnel", "--bg", "--set-path=/mcp/messages", TARGETS["/mcp/messages"]],
+		["funnel", "status", "--json"],
+	])
+})
+
+test("Funnel 配置后未就绪会中止启动", async () => {
+	const runner = fakeRunner([
+		status({ paths: [] }),
+		{ status: 0, stdout: "", stderr: "" },
+		{ status: 0, stdout: "", stderr: "" },
+		{ status: 0, stdout: "", stderr: "" },
+		status({ paths: [] }),
+	])
+	const manager = createTailscaleManager({ path: "tailscale", run: runner.run })
+	await assert.rejects(() => manager.ensureMcpFunnel(PORT), /配置后仍未就绪：missing/)
+	assert.deepEqual(runner.calls.map((call) => call.args), [
+		["funnel", "status", "--json"],
+		["funnel", "--bg", "--set-path=/mcp", TARGET],
+		["funnel", "--bg", "--set-path=/mcp/sse", TARGETS["/mcp/sse"]],
+		["funnel", "--bg", "--set-path=/mcp/messages", TARGETS["/mcp/messages"]],
+		["funnel", "status", "--json"],
+	])
+})
+
 test("已正确配置不改 Funnel；错误目标中止且不覆盖用户配置", async () => {
 	for (const [result, pattern] of [
 		[status(), null],
 		[status({ targets: { "/mcp": "http://127.0.0.1:9999" } }), /已指向其他目标/],
 		[status({ targets: { "/mcp/sse": "http://127.0.0.1:9999" } }), /已指向其他目标/],
 		[status({ paths: ["/", ...MCP_FUNNEL_PATHS], targets: { "/": "http://127.0.0.1:9999" } }), /根路径已指向其他目标/],
+		[
+			status({ paths: ["/", ...MCP_FUNNEL_PATHS], targets: { "/": "http://127.0.0.1:9999", "/mcp": LEGACY_TARGET } }),
+			/根路径已指向其他目标/,
+		],
 	]) {
 		const runner = fakeRunner([result])
 		const manager = createTailscaleManager({ path: "tailscale", run: runner.run })
