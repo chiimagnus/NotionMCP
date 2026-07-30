@@ -12,7 +12,7 @@ export const name = "read_rules"
 export const definition = {
 	name,
 	title: "Read Rules",
-	description: "只读地加载全局 ~/.codex/AGENTS.md、当前项目从外到内的 AGENTS.md，以及所有可用 skills 的 key、SKILL.md 路径、name、description。开始开发任务时先调用，随后用 read_file 按需读取技能正文。",
+	description: "只读地加载全局 ~/.codex/AGENTS.md、当前项目从外到内的 AGENTS.md，以及所有可用 skills 的 SKILL.md 路径、name、description。开始开发任务时先调用，随后用 read_file 按需读取技能正文。",
 	inputSchema: {
 		type: "object",
 		properties: {
@@ -55,7 +55,7 @@ function skillLocations(dir, relPath = "", signature = []) {
 		const skillInfo = statSync(file)
 		if (skillInfo.isFile()) {
 			signature.push(`${relPath}/SKILL.md:${skillInfo.mtimeMs}:${skillInfo.size}`)
-			return [{ key: relPath || basename(dir), dir, file }]
+			return [{ dir, file }]
 		}
 	} catch (error) {
 		if (error?.code !== "ENOENT") log("warning", "read_rules", "catalog_scan_failed", { errorType: error?.name || "Error" })
@@ -88,7 +88,7 @@ function getSkillsCatalog() {
 			}
 			return { ...location, name: front.name || basename(location.dir), description: (front.description || "(无 description)").slice(0, 300) }
 		})
-		.sort((a, b) => a.key.localeCompare(b.key))
+		.sort((a, b) => a.file.localeCompare(b.file))
 	cachedCatalog = { signature: fingerprint, entries }
 	return entries
 }
@@ -97,7 +97,7 @@ function formatSkillsCatalog() {
 	const skills = getSkillsCatalog()
 	if (skills.length === 0) return "\n\n[available skills]\n(no skills found)"
 	return `\n\n[available skills]\n${skills
-		.map((skill) => `- key: ${skill.key}\n  path: ${skill.file}\n  name: ${skill.name}\n  description: ${skill.description}`)
+		.map((skill) => `- path: ${skill.file}\n  name: ${skill.name}\n  description: ${skill.description}`)
 		.join("\n")}`
 }
 
