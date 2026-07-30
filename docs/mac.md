@@ -80,7 +80,7 @@ node bin/notionmcp.mjs install
 node bin/notionmcp.mjs uninstall
 ```
 
-服务只监听 `127.0.0.1:<端口>`；Tailscale Funnel 只公开 `/mcp`、`/mcp/sse` 和 `/mcp/messages`。启动器只管理这三条路径，不会 `tailscale funnel reset`，也不会删除其他 route。
+服务只监听 `127.0.0.1:<端口>`；Tailscale Funnel 只公开 `/mcp`、`/mcp/sse` 和 `/mcp/messages`。启动器只管理这三条路径，不会 `tailscale funnel reset`，也不会删除其他 route；仅会清理旧版本指向该本机端口的 `/` 路由。
 
 Notion 中选择 **Add connection → Custom MCP server**：
 
@@ -90,6 +90,6 @@ Notion 中选择 **Add connection → Custom MCP server**：
 | 鉴权方式 | Bearer Token |
 | Token | 钥匙串中的裸值 |
 
-Notion 的 Server URL 始终填写 `/mcp`。服务会兼容 Notion 当前的 2025 GET 通知流；只有明确要求 2024 HTTP+SSE 地址的旧客户端才填写 `/mcp/sse`，不要把它用于 Notion。
+Notion 的 Server URL 始终填写 `/mcp`。2025 Streamable HTTP 的独立 GET 会被服务以 `405 Allow: POST` 拒绝，避免无用长连接；Notion 的初始化和工具调用仍使用 POST。只有明确要求 2024 HTTP+SSE 地址的旧客户端才填写 `/mcp/sse`，不要把它用于 Notion。
 
 排障见 [operations.md](./operations.md)。
