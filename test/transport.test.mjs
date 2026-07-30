@@ -327,6 +327,20 @@ test("2025 Streamable HTTP 可拒绝独立 GET，POST 仍可调用", async (t) =
 	})
 	assert.equal(listed.status, 200)
 	assert.match(listed.body, /"name":"read_rules"/)
+	const called = await request(port, {
+		headers: { ...headers, "Mcp-Method": "tools/call", "Mcp-Name": "run_command" },
+		body: JSON.stringify({
+			jsonrpc: "2.0",
+			id: 3,
+			method: "tools/call",
+			params: {
+				name: "run_command",
+				arguments: { command: nodeCommand(process.execPath, "-e", "process.stdout.write('compat-run-command')") },
+			},
+		}),
+	})
+	assert.equal(called.status, 200)
+	assert.match(called.body, /compat-run-command/)
 	const records = (await readFile(logFile, "utf8")).trimEnd().split("\n").map(JSON.parse)
 	const rejected = records.findLast((record) => record.transport === "streamable_get_probe" && record.event === "rejected")
 	assert.equal(rejected.mcpProtocol, COMPAT_PROTOCOL_VERSION)
