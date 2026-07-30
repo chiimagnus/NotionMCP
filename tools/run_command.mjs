@@ -19,7 +19,7 @@ import { resolvePath } from "../lib/paths.mjs"
 // ponytail: 查一次 pwsh.exe 的位置：先查 PATH，再查 PowerShell 7 MSI 的固定安装目录。
 // 这个函数本身只做“查找”，不在模块加载时（import 阶段）调用——找不到 pwsh 时
 // 只应该让 run_command 这一次调用报错，不应该影响整个 MCP server，否则
-// read_image / apply_patch / load_skills 这三个跟 pwsh 毫无关系的工具也会全部
+// read_image / apply_patch / read_file 等跟 pwsh 毫无关系的工具也会全部
 // 跟着不可用。
 function resolveWindowsShell() {
 	const candidates = (process.env.PATH || "")

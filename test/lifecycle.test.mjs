@@ -656,7 +656,7 @@ const TOOLS_LIST = { jsonrpc: "2.0", id: 99, method: "tools/list", params: {} }
 async function assertHttpHealthy(lifecycle, port, token) {
 	const response = await mcpRequest(port, token, TOOLS_LIST)
 	assert.equal(response.status, 200)
-	assert.equal(JSON.parse(response.body).result.tools.length, 6)
+	assert.equal(JSON.parse(response.body).result.tools.length, 5)
 	assert.equal(response.headers["mcp-session-id"], undefined)
 	assert.equal(lifecycle.activeRequestCount, 0)
 }
@@ -814,7 +814,7 @@ test("现代无状态 HTTP 完成基础 MCP 协议且可确定关闭", async (t)
 		assert.equal(response.headers["mcp-session-id"], undefined)
 	}
 	assert.equal(responses[0].status, 200)
-	assert.equal(JSON.parse(responses[0].body).result.tools.length, 6)
+	assert.equal(JSON.parse(responses[0].body).result.tools.length, 5)
 	assert.equal(JSON.parse(responses[1].body).error.code, -32602)
 	assert.equal(lifecycle.activeRequestCount, 0)
 
@@ -1081,7 +1081,7 @@ test("二十四条并发工具调用经 FIFO 背压全部完成", async (t) => {
 	assert.equal(lifecycle.queuedRequestCount, 0)
 })
 
-test("六个工具均经真实 HTTP 到达", async (t) => {
+test("五个工具均经真实 HTTP 到达", async (t) => {
 	const { lifecycle, port, token } = await startMcpServer(t)
 	const commandHelper = join(httpFixture.dir, "http-output.cjs")
 	await writeFile(commandHelper, `process.stdout.write("via-http")\n`)
@@ -1094,9 +1094,8 @@ test("六个工具均经真实 HTTP 到达", async (t) => {
 		toolCall("apply_patch", {
 			operations: [{ type: "create_file", path: patched, content: "created", overwrite: true }],
 		}, 22),
-		toolCall("load_skills", { name: "fixture-skill" }, 23),
-		toolCall("read_file", { path: patched }, 24),
-		toolCall("read_rules", { cwd: httpFixture.dir }, 25),
+		toolCall("read_file", { path: patched }, 23),
+		toolCall("read_rules", { cwd: httpFixture.dir }, 24),
 	]
 	const responses = []
 	for (const call of calls) responses.push(await mcpRequest(port, token, call))
@@ -1104,10 +1103,9 @@ test("六个工具均经真实 HTTP 到达", async (t) => {
 	assert.match(JSON.parse(responses[0].body).result.content[0].text, /via-http/)
 	assert.equal(JSON.parse(responses[1].body).result.content[0].data, Buffer.from([1, 2, 3]).toString("base64"))
 	assert.equal(await readFile(patched, "utf8"), "created")
-	assert.match(JSON.parse(responses[3].body).result.content[0].text, /fixture-skill/)
-	assert.match(JSON.parse(responses[4].body).result.content[0].text, /created/)
-	assert.match(JSON.parse(responses[5].body).result.content[0].text, /read rules/)
-	assert.match(JSON.parse(responses[5].body).result.content[0].text, /fixture-skill/)
+	assert.match(JSON.parse(responses[3].body).result.content[0].text, /created/)
+	assert.match(JSON.parse(responses[4].body).result.content[0].text, /read rules/)
+	assert.match(JSON.parse(responses[4].body).result.content[0].text, /fixture-skill/)
 
 })
 

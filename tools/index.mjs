@@ -7,11 +7,10 @@
 import * as runCommand from "./run_command.mjs"
 import * as readImage from "./read_image.mjs"
 import * as applyPatch from "./apply_patch.mjs"
-import * as loadSkills from "./load_skills.mjs"
 import * as readFile from "./read_file.mjs"
 import * as readRules from "./read_rules.mjs"
 
-const modules = [runCommand, readImage, applyPatch, loadSkills, readFile, readRules]
+const modules = [runCommand, readImage, applyPatch, readFile, readRules]
 
 export const definitions = modules.map((m) => m.definition)
 

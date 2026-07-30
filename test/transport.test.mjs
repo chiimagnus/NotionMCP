@@ -20,13 +20,13 @@ const MODERN_TOOLS_LIST = {
 		},
 	},
 }
-const MODERN_LOAD_SKILL = {
+const MODERN_RUN_COMMAND = {
 	jsonrpc: "2.0",
 	id: 3,
 	method: "tools/call",
 	params: {
-		name: "load_skills",
-		arguments: { name: "fixture-skill" },
+		name: "run_command",
+		arguments: { command: "" },
 		_meta: MODERN_TOOLS_LIST.params._meta,
 	},
 }
@@ -138,9 +138,6 @@ async function getFixture() {
 	if (fixture) return fixture
 	const dir = await mkdtemp(join(tmpdir(), "notionmcp-transport-"))
 	const config = await writeConfig(dir)
-	const skillDir = join(dir, "fixture-skill")
-	await mkdir(skillDir)
-	await writeFile(join(skillDir, "SKILL.md"), "---\nname: fixture-skill\ndescription: test skill\n---\n")
 	const previous = { config: process.env.MCP_CONFIG_FILE, log: process.env.MCP_LOG_FILE }
 	const logFile = join(dir, "mcp.log")
 	process.env.MCP_CONFIG_FILE = config
@@ -168,14 +165,13 @@ test("现代 Streamable HTTP 探测、取消和后续请求互相隔离", async 
 	const initial = await modernRequest(port, MODERN_TOOLS_LIST)
 	assert.equal(initial.status, 200)
 	const listedTools = JSON.parse(initial.body).result.tools
-	assert.equal(listedTools.length, 6)
+		assert.equal(listedTools.length, 5)
 	assert.deepEqual(
 		listedTools.map(({ name, title }) => ({ name, title })),
 		[
 			{ name: "run_command", title: "Run Command" },
 			{ name: "read_image", title: "Read Image" },
 			{ name: "apply_patch", title: "Edit Files" },
-			{ name: "load_skills", title: "Load Skills" },
 			{ name: "read_file", title: "Read Text File" },
 			{ name: "read_rules", title: "Read Rules" },
 		],
@@ -250,15 +246,14 @@ test("2026 Streamable HTTP 校验元数据和头部一致性", async (t) => {
 	const current = await modernRequest(port, MODERN_TOOLS_LIST)
 	assert.equal(current.status, 200)
 	assert.match(current.headers["content-type"], /^application\/json/)
-	assert.equal(JSON.parse(current.body).result.tools.length, 6)
-	const called = await modernRequest(port, MODERN_LOAD_SKILL, { "Mcp-Name": "load_skills" })
+	assert.equal(JSON.parse(current.body).result.tools.length, 5)
+	const called = await modernRequest(port, MODERN_RUN_COMMAND, { "Mcp-Name": "run_command" })
 	assert.equal(called.status, 200)
-	assert.match(JSON.parse(called.body).result.content[0].text, /fixture-skill/)
 
 	const mismatchedMethod = await modernRequest(port, MODERN_TOOLS_LIST, { "Mcp-Method": "tools/call" })
 	assert.equal(mismatchedMethod.status, 400)
 	assert.equal(JSON.parse(mismatchedMethod.body).error.code, -32020)
-	const mismatchedName = await modernRequest(port, MODERN_LOAD_SKILL, { "Mcp-Name": "run_command" })
+	const mismatchedName = await modernRequest(port, MODERN_RUN_COMMAND, { "Mcp-Name": "read_file" })
 	assert.equal(mismatchedName.status, 400)
 	assert.equal(JSON.parse(mismatchedName.body).error.code, -32020)
 
@@ -395,7 +390,7 @@ test("旧 HTTP+SSE 使用显式 /mcp/sse 会话入口并调用工具", async (t)
 		202,
 	)
 	await waitFor(() => sse.messages.some((message) => message.id === 2), "SSE tools/list response did not arrive")
-	assert.equal(sse.messages.find((message) => message.id === 2).result.tools.length, 6)
+	assert.equal(sse.messages.find((message) => message.id === 2).result.tools.length, 5)
 	const health = JSON.parse((await request(port, { path: "/healthz", method: "GET" })).body)
 	assert.equal(health.connections.legacySse, 1)
 	const log = await readFile(logFile, "utf8")
