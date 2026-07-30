@@ -7,7 +7,7 @@ import test, { after } from "node:test"
 
 const TOKEN = "0123456789abcdef".repeat(4)
 const MODERN_PROTOCOL_VERSION = "2026-07-28"
-const GET_COMPAT_PROTOCOL_VERSION = "2025-06-18"
+const COMPAT_PROTOCOL_VERSION = "2025-11-25"
 const MODERN_TOOLS_LIST = {
 	jsonrpc: "2.0",
 	id: 2,
@@ -98,34 +98,6 @@ function openSse(port, path = "/mcp/sse") {
 					if (event === "endpoint" && data) resolve({ endpoint: data, messages, close: () => { req.destroy(); res.destroy() } })
 					if (event === "message" && data) messages.push(JSON.parse(data))
 				}
-			})
-			res.once("error", reject)
-		})
-		req.end()
-	})
-}
-
-function openStreamableSse(port) {
-	return new Promise((resolve, reject) => {
-		let buffer = ""
-		const req = http.request({
-			host: "127.0.0.1",
-			port,
-			path: "/mcp",
-			method: "GET",
-		headers: { Authorization: `Bearer ${TOKEN}`, Accept: "text/event-stream", "Mcp-Protocol-Version": GET_COMPAT_PROTOCOL_VERSION },
-		})
-		req.once("error", reject)
-		req.once("response", (res) => {
-			if (res.statusCode !== 200) {
-				reject(new Error(`SSE status ${res.statusCode}`))
-				res.resume()
-				return
-			}
-			res.setEncoding("utf8")
-			res.on("data", (chunk) => {
-				buffer += chunk
-				if (buffer.includes(": connected\n\n")) resolve({ headers: res.headers, close: () => { req.destroy(); res.destroy() } })
 			})
 			res.once("error", reject)
 		})
@@ -308,30 +280,57 @@ test("2026 Streamable HTTP 校验元数据和头部一致性", async (t) => {
 	assert.equal(invalidOrigin.status, 403)
 })
 
-test("2025 Streamable HTTP GET 保持轻量通知流，不创建旧 SSE 会话", async (t) => {
+test("2025 Streamable HTTP 可拒绝独立 GET，POST 仍可调用", async (t) => {
 	const { module, logFile } = await getFixture()
 	const lifecycle = module.createMcpHttpServer({ port: 0, token: TOKEN })
 	t.after(() => lifecycle.shutdown())
 	const { port } = await lifecycle.listen()
 
-	assert.equal(
-		(await request(port, { path: "/mcp", method: "GET", headers: { Accept: "text/event-stream" } })).status,
-		401,
-	)
-	const sse = await openStreamableSse(port)
-	t.after(sse.close)
-	assert.match(sse.headers["content-type"], /^text\/event-stream/)
+	const get = await request(port, {
+		path: "/mcp",
+		method: "GET",
+		headers: { Authorization: `Bearer ${TOKEN}`, Accept: "text/event-stream", "Mcp-Protocol-Version": COMPAT_PROTOCOL_VERSION },
+	})
+	assert.equal(get.status, 405)
+	assert.equal(get.headers.allow, "POST")
 	assert.equal(lifecycle.legacySseCount, 0)
-	assert.equal(lifecycle.streamableSseCount, 1)
 	const health = JSON.parse((await request(port, { path: "/healthz", method: "GET" })).body)
-	assert.deepEqual(health.connections, { open: health.connections.open, legacySse: 0, streamableSse: 1, totalSse: 1 })
-	assert.equal((await modernRequest(port, MODERN_TOOLS_LIST)).status, 200)
+	assert.deepEqual(health.connections, { open: health.connections.open, legacySse: 0, totalSse: 0 })
+	const headers = {
+		Authorization: `Bearer ${TOKEN}`,
+		Accept: "application/json, text/event-stream",
+		"Content-Type": "application/json",
+		"Mcp-Protocol-Version": COMPAT_PROTOCOL_VERSION,
+	}
+	const initialize = await request(port, {
+		headers: { ...headers, "Mcp-Method": "initialize" },
+		body: JSON.stringify({
+			jsonrpc: "2.0",
+			id: 1,
+			method: "initialize",
+			params: { protocolVersion: COMPAT_PROTOCOL_VERSION, capabilities: {}, clientInfo: { name: "notion", version: "1.0" } },
+		}),
+	})
+	assert.equal(initialize.status, 200)
+	assert.equal(
+		(
+			await request(port, {
+				headers: { ...headers, "Mcp-Method": "notifications/initialized" },
+				body: JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized", params: {} }),
+			})
+		).status,
+		202,
+	)
+	const listed = await request(port, {
+		headers: { ...headers, "Mcp-Method": "tools/list" },
+		body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} }),
+	})
+	assert.equal(listed.status, 200)
+	assert.match(listed.body, /"name":"read_rules"/)
 	const records = (await readFile(logFile, "utf8")).trimEnd().split("\n").map(JSON.parse)
-	const opened = records.findLast((record) => record.transport === "streamable_sse" && record.event === "sse_opened")
-	assert.equal(opened.mcpProtocol, GET_COMPAT_PROTOCOL_VERSION)
-	assert.equal(opened.streamableSseSessions, 1)
-	sse.close()
-	await waitFor(() => lifecycle.streamableSseCount === 0, "closed Streamable SSE did not leave the manager")
+	const rejected = records.findLast((record) => record.transport === "streamable_get_probe" && record.event === "rejected")
+	assert.equal(rejected.mcpProtocol, COMPAT_PROTOCOL_VERSION)
+	assert.equal(rejected.reason, "get_stream_not_supported")
 })
 
 test("旧 HTTP+SSE 使用显式 /mcp/sse 会话入口并调用工具", async (t) => {
@@ -479,45 +478,33 @@ test("同一旧 SSE 会话的并发工具调用进入共享 FIFO", async (t) => 
 	for (const id of [2, 3]) assert.notEqual(sse.messages.find((message) => message.id === id).result.isError, true)
 })
 
-test("SSE 总容量只拒绝新流，不关闭既有 Streamable 或旧 SSE 连接", async (t) => {
+test("旧 SSE 容量只拒绝新连接，不关闭既有会话", async (t) => {
 	const { module } = await getFixture()
 	const lifecycle = module.createMcpHttpServer({ port: 0, token: TOKEN })
 	t.after(() => lifecycle.shutdown())
 	const { port } = await lifecycle.listen()
 	const sessions = []
-	for (let index = 0; index < 255; index += 1) sessions.push(await openStreamableSse(port))
+	for (let index = 0; index < 256; index += 1) sessions.push(await openSse(port))
 	t.after(() => sessions.forEach((session) => session.close()))
-	const legacy = await openSse(port)
-	t.after(legacy.close)
-	assert.equal(lifecycle.streamableSseCount, 255)
-	assert.equal(lifecycle.legacySseCount, 1)
+	assert.equal(lifecycle.legacySseCount, 256)
 	const denied = await request(port, {
-		path: "/mcp",
+		path: "/mcp/sse",
 		method: "GET",
 		headers: { Authorization: `Bearer ${TOKEN}`, Accept: "text/event-stream" },
 	})
 	assert.equal(denied.status, 503)
 	assert.equal(denied.headers["retry-after"], "1")
 	const health = JSON.parse((await request(port, { path: "/healthz", method: "GET" })).body)
-	assert.equal(health.connections.streamableSse, 255)
-	assert.equal(health.connections.legacySse, 1)
+	assert.equal(health.connections.legacySse, 256)
 	assert.equal(health.sseHighWater, 256)
 	assert.equal((await modernRequest(port, MODERN_TOOLS_LIST)).status, 200)
 })
 
-test("持有 SSE 时两轮十二条命令跨过并发阈值后恢复", async (t) => {
+test("两轮十二条命令跨过并发阈值后恢复", async (t) => {
 	const { module, dir, logFile } = await getFixture()
 	const lifecycle = module.createMcpHttpServer({ port: 0, token: TOKEN })
 	t.after(() => lifecycle.shutdown())
 	const { port } = await lifecycle.listen()
-	const logStart = (await readFile(logFile, "utf8").catch(() => "")).trimEnd().split("\n").filter(Boolean).length
-	const streams = []
-	for (let index = 0; index < 32; index += 1) streams.push(await openStreamableSse(port))
-	t.after(() => streams.forEach((stream) => stream.close()))
-	const streamRecords = (await readFile(logFile, "utf8")).trimEnd().split("\n").filter(Boolean).slice(logStart).map(JSON.parse)
-	const receivedStreams = streamRecords.filter((record) => record.transport === "streamable_sse" && record.event === "received")
-	assert.equal(receivedStreams.length, 32)
-	assert.ok(receivedStreams.every((record) => record.mcpProtocol === GET_COMPAT_PROTOCOL_VERSION))
 	const helper = join(dir, "concurrency-delay.cjs")
 	await writeFile(helper, `setTimeout(()=>process.stdout.write(process.argv[2]),300)\n`)
 	const command = (id) =>
@@ -545,12 +532,11 @@ test("持有 SSE 时两轮十二条命令跨过并发阈值后恢复", async (t)
 		const health = JSON.parse((await request(port, { path: "/healthz", method: "GET" })).body)
 		assert.equal(health.activeRequests, 0)
 		assert.equal(health.queuedRequests, 0)
-		assert.equal(health.connections.streamableSse, 32)
+		assert.equal(health.connections.legacySse, 0)
 	}
-	streams.forEach((stream) => stream.close())
 	await waitFor(
-		() => lifecycle.streamableSseCount === 0 && lifecycle.activeRequestCount === 0 && lifecycle.queuedRequestCount === 0 && lifecycle.connectionCount === 0,
-		"combined stress test leaked an SSE stream, request, or socket",
+		() => lifecycle.activeRequestCount === 0 && lifecycle.queuedRequestCount === 0 && lifecycle.connectionCount === 0,
+		"combined stress test leaked a request or socket",
 	)
 })
 

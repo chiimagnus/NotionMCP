@@ -677,7 +677,7 @@ test("healthz 仅接受直连 loopback，并给每个 MCP 请求留下脱敏 tra
 			maxActiveRequests: 10,
 			queuedRequests: 0,
 			maxQueuedRequests: 64,
-			connections: { open: 1, legacySse: 0, streamableSse: 0, totalSse: 0 },
+			connections: { open: 1, legacySse: 0, totalSse: 0 },
 			maxSseStreams: 256,
 			sseHighWater: 0,
 			checks: { listener: "ready", acceptingRequests: "ready" },
