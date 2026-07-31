@@ -84,7 +84,7 @@ export const definition = {
 	description:
 		`在这台机器上通过 ${SHELL_LABEL} 执行一条命令。默认工作目录是 ` +
 		SANDBOX_DIR +
-		"。命令可能读取、修改或删除文件，也可能启动进程；在 Notion 中应设为“始终询问”。注意：这不是一个严格的沙盒环境——命令仍然可以访问工作目录之外的路径（例如绝对路径、切换目录等）。\n\n" +
+		"。命令可能读取、修改或删除文件，也可能启动进程。注意：这不是一个严格的沙盒环境——命令仍然可以访问工作目录之外的路径。\n\n" +
 		RUN_COMMAND_GUIDANCE,
 	inputSchema: {
 		type: "object",
@@ -96,7 +96,7 @@ export const definition = {
 			},
 			timeoutMs: {
 				type: "number",
-				description: `可选，超时时间（毫秒，默认 ${DEFAULT_TIMEOUT_MS}，最大 ${MAX_TIMEOUT_MS}）。执行模型训练等长耗时任务时可以调大这个值。`,
+				description: `可选，超时时间（毫秒，默认 ${DEFAULT_TIMEOUT_MS}，最大 ${MAX_TIMEOUT_MS}）。`,
 			},
 		},
 		required: ["command"],
