@@ -13,7 +13,7 @@ export const definition = {
   name,
   title: "Read Rules",
   description:
-    "只读地加载全局规则文件、当前项目从外到内的 AGENTS.md，以及所有可用 skills 的 key、SKILL.md 路径、name、description。开始开发任务时先调用，随后用 read_file 按需读取技能正文。",
+    "只读地加载全局规则文件、当前项目从外到内的 AGENTS.md/CLAUDE.md，以及所有可用 skills 的 key、SKILL.md 路径、name、description。开始开发任务时先调用，随后用 read_file 按需读取技能正文。",
   inputSchema: {
     type: "object",
     properties: {
@@ -126,7 +126,7 @@ function formatSkillsCatalog() {
   return `\n\n[available skills]\n${skills
     .map(
       (skill) =>
-        `- key: ${skill.key}\n  path: ${skill.file}\n  name: ${skill.name}\n  description: ${skill.description}`,
+        `- key: ${skill.key}\n  path: ${skill.file.replaceAll("\\", "/")}\n  name: ${skill.name}\n  description: ${skill.description}`,
     )
     .join("\n")}`;
 }
@@ -142,7 +142,7 @@ export async function call(args, { signal } = {}) {
   const workDir = cwd ? resolvePath(cwd) : SANDBOX_DIR;
   const context = await getAgentsMdContext(workDir, {
     signal,
-    globalFile: join(dirname(SKILLS_ROOT), "AGENTS.md"),
+    globalDir: dirname(SKILLS_ROOT),
   });
   if (context.cancelled)
     return {
