@@ -552,6 +552,7 @@ async function getHttpFixture() {
 	const skillDir = join(dir, "fixture-skill")
 	await mkdir(skillDir)
 	await writeFile(join(skillDir, "SKILL.md"), "---\nname: fixture-skill\ndescription: test skill\n---\n")
+	await writeFile(join(dir, "AGENTS.md"), "http fixture rule")
 	const previous = {
 		config: process.env.MCP_CONFIG_FILE,
 		log: process.env.MCP_LOG_FILE,
@@ -1104,7 +1105,7 @@ test("五个工具均经真实 HTTP 到达", async (t) => {
 	assert.equal(JSON.parse(responses[1].body).result.content[0].data, Buffer.from([1, 2, 3]).toString("base64"))
 	assert.equal(await readFile(patched, "utf8"), "created")
 	assert.match(JSON.parse(responses[3].body).result.content[0].text, /created/)
-	assert.match(JSON.parse(responses[4].body).result.content[0].text, /read rules/)
+	assert.match(JSON.parse(responses[4].body).result.content[0].text, /--- AGENTS\.md:/)
 	assert.match(JSON.parse(responses[4].body).result.content[0].text, /fixture-skill/)
 
 })
