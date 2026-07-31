@@ -201,9 +201,16 @@ function runCommand({ command, cwd, timeoutMs }, { signal } = {}) {
 			// exe 退出码是多少），导致 node -e "process.exit(7)" 这类命令在 Windows 上总是报成 "exit code: 1"。
 			// 在用户命令后面追加一句显式把 $LASTEXITCODE 传递出去；只在它非 $null 时（确实跑过原生命令）才生效，
 			// 纯 cmdlet 命令（$LASTEXITCODE 一直是 $null）不受影响。
+			// ponytail: PowerShell 里以引号开头的语句默认按“表达式”解析，紧跟着的第二个裸参数
+			// （比如 "node.exe" "-e" "code" 里的 "-e"）会直接触发 ParserError，必须显式加调用
+			// 操作符 & 才会按“命令”方式解析。这正是“整条命令就是调用一个带空格、需要加引号的
+			// 可执行文件路径”的最常见真实场景（Program Files 下的 node/python 等），所以只在
+			// 命令确实以引号开头时才补 &，不去动其它命令形态（赋值、if/for、裸字符串表达式等）。
+			const needsCallOperator = process.platform === "win32" && /^\s*["']/.test(command)
+			const invocableCommand = needsCallOperator ? `& ${command}` : command
 			const winCommand =
 				process.platform === "win32"
-					? `[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); $OutputEncoding = [Console]::OutputEncoding; $PSDefaultParameterValues['*:Encoding'] = 'utf8'; ${command}\nif ($null -ne $LASTEXITCODE) { exit $LASTEXITCODE }`
+					? `[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); $OutputEncoding = [Console]::OutputEncoding; $PSDefaultParameterValues['*:Encoding'] = 'utf8'; ${invocableCommand}\nif ($null -ne $LASTEXITCODE) { exit $LASTEXITCODE }`
 					: command
 			const args = process.platform === "win32" ? ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", winCommand] : ["-c", command]
 			// ponytail: 同一类编码问题的另一半——Python 在 ACP=936 的机器上往管道打印中文会直接
