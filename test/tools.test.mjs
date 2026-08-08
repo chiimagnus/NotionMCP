@@ -8,7 +8,7 @@ async function readTool(dir) {
 	const config = join(dir, ".env")
 	const logFile = join(dir, "mcp.log")
 	const token = "0123456789abcdef".repeat(4)
-	await writeFile(config, [`MCP_PORT=8000`, `MCP_SANDBOX_DIR_MACOS=${dir}`, `MCP_SKILLS_DIR_MACOS=${dir}`, `MCP_SANDBOX_DIR_LINUX=${dir}`, `MCP_SKILLS_DIR_LINUX=${dir}`, `MCP_TOKEN_LINUX=${token}`, `MCP_SANDBOX_DIR_WINDOWS=${dir}`, `MCP_SKILLS_DIR_WINDOWS=${dir}`, `MCP_TOKEN_WINDOWS=${token}`].join("\n"))
+	await writeFile(config, [`MCP_PORT=8000`, `SKILLS_IGNORE=Beta, Missing`, `MCP_SANDBOX_DIR_MACOS=${dir}`, `MCP_SKILLS_DIR_MACOS=${dir}`, `MCP_SANDBOX_DIR_LINUX=${dir}`, `MCP_SKILLS_DIR_LINUX=${dir}`, `MCP_TOKEN_LINUX=${token}`, `MCP_SANDBOX_DIR_WINDOWS=${dir}`, `MCP_SKILLS_DIR_WINDOWS=${dir}`, `MCP_TOKEN_WINDOWS=${token}`].join("\n"))
 	const previous = { config: process.env.MCP_CONFIG_FILE, log: process.env.MCP_LOG_FILE }
 	process.env.MCP_CONFIG_FILE = config
 	process.env.MCP_LOG_FILE = logFile
@@ -93,10 +93,13 @@ test("read_file 只读 UTF-8 普通文件，并校验范围、大小、二进制
 
 	const alpha = join(dir, "skills", "alpha")
 	const beta = join(dir, "skills", "nested", "beta")
+	const nameless = join(dir, "skills", "nameless")
 	await mkdir(alpha, { recursive: true })
 	await mkdir(beta, { recursive: true })
+	await mkdir(nameless, { recursive: true })
 	await writeFile(join(alpha, "SKILL.md"), "---\nname: Alpha\ndescription: alpha development workflow\n---\nALPHA_BODY_MUST_NOT_BE_DISCOVERED")
 	await writeFile(join(beta, "SKILL.md"), "---\nname: Beta\ndescription: nested review workflow\n---\nBETA_BODY")
+	await writeFile(join(nameless, "SKILL.md"), "---\ndescription: missing name\n---\nNAMELESS_BODY")
 	const registry = await import("../tools/index.mjs")
 	assert.equal(registry.definitions.some((tool) => tool.name === "load_skills"), false)
 	const cancelledDir = join(dir, "cancelled-patch")
@@ -115,7 +118,8 @@ test("read_file 只读 UTF-8 普通文件，并校验范围、大小、二进制
 	await assert.rejects(readFile(join(cancelledDir, "second.txt")), { code: "ENOENT" })
 	const projectWithSkills = await readRules.call({ cwd: nested })
 	assert.match(projectWithSkills.content[0].text, /path: .*skills\/alpha\/SKILL\.md\n  name: Alpha\n  description: alpha development workflow/)
-	assert.match(projectWithSkills.content[0].text, /path: .*skills\/nested\/beta\/SKILL\.md\n  name: Beta\n  description: nested review workflow/)
+	assert.doesNotMatch(projectWithSkills.content[0].text, /name: Beta/)
+	assert.doesNotMatch(projectWithSkills.content[0].text, /name: nameless/)
 	assert.doesNotMatch(projectWithSkills.content[0].text, /key:/)
 	assert.doesNotMatch(projectWithSkills.content[0].text, /ALPHA_BODY_MUST_NOT_BE_DISCOVERED/)
 	assert.match((await module.call({ path: join(alpha, "SKILL.md") })).content[0].text, /ALPHA_BODY_MUST_NOT_BE_DISCOVERED/)

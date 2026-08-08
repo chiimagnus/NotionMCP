@@ -1,7 +1,7 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
-import { basename, dirname, join } from "node:path";
+import { dirname, join } from "node:path";
 
-import { SANDBOX_DIR, SKILLS_ROOT } from "../lib/config.mjs";
+import { SANDBOX_DIR, SKILLS_IGNORE, SKILLS_ROOT } from "../lib/config.mjs";
 import { formatAgentsMdContext, getAgentsMdContext } from "../lib/agentsMd.mjs";
 import { log } from "../lib/log.mjs";
 import { resolvePath } from "../lib/paths.mjs";
@@ -109,12 +109,18 @@ function getSkillsCatalog() {
           errorType: error?.name || "Error",
         });
       }
+      if (!front.name) {
+        log("warning", "read_rules", "skill_missing_name");
+        return null;
+      }
       return {
         ...location,
-        name: front.name || basename(location.dir),
+        name: front.name,
         description: (front.description || "(无 description)").slice(0, 300),
       };
     })
+    .filter(Boolean)
+    .filter((skill) => !SKILLS_IGNORE.has(skill.name))
     .sort((a, b) => a.file.localeCompare(b.file));
   cachedCatalog = { signature: fingerprint, entries };
   return entries;
