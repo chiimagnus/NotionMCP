@@ -15,10 +15,10 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 
 ```dotenv
 MCP_PORT=8000
-# 可选：逗号分隔要跳过的 SKILL.md name；不存在的名称会被忽略。
-# SKILLS_IGNORE=imagegen,blender
 MCP_SANDBOX_DIR_LINUX=~/AI-Share
 MCP_SKILLS_DIR_LINUX=~/.codex/skills
+# 可选：逗号分隔要跳过的 SKILL.md name；不存在的名称会被忽略。
+# SKILLS_IGNORE_LINUX=imagegen,blender
 MCP_TOKEN_LINUX=粘贴刚生成的64位十六进制字符串
 ```
 

@@ -8,7 +8,7 @@ async function readTool(dir) {
 	const config = join(dir, ".env")
 	const logFile = join(dir, "mcp.log")
 	const token = "0123456789abcdef".repeat(4)
-	await writeFile(config, [`MCP_PORT=8000`, `SKILLS_IGNORE=Beta, Missing`, `MCP_SANDBOX_DIR_MACOS=${dir}`, `MCP_SKILLS_DIR_MACOS=${dir}`, `MCP_SANDBOX_DIR_LINUX=${dir}`, `MCP_SKILLS_DIR_LINUX=${dir}`, `MCP_TOKEN_LINUX=${token}`, `MCP_SANDBOX_DIR_WINDOWS=${dir}`, `MCP_SKILLS_DIR_WINDOWS=${dir}`, `MCP_TOKEN_WINDOWS=${token}`].join("\n"))
+	await writeFile(config, [`MCP_PORT=8000`, `SKILLS_IGNORE=Alpha`, `SKILLS_IGNORE_MACOS=Beta, Missing`, `SKILLS_IGNORE_LINUX=Beta, Missing`, `SKILLS_IGNORE_WINDOWS=Beta, Missing`, `MCP_SANDBOX_DIR_MACOS=${dir}`, `MCP_SKILLS_DIR_MACOS=${dir}`, `MCP_SANDBOX_DIR_LINUX=${dir}`, `MCP_SKILLS_DIR_LINUX=${dir}`, `MCP_TOKEN_LINUX=${token}`, `MCP_SANDBOX_DIR_WINDOWS=${dir}`, `MCP_SKILLS_DIR_WINDOWS=${dir}`, `MCP_TOKEN_WINDOWS=${token}`].join("\n"))
 	const previous = { config: process.env.MCP_CONFIG_FILE, log: process.env.MCP_LOG_FILE }
 	process.env.MCP_CONFIG_FILE = config
 	process.env.MCP_LOG_FILE = logFile

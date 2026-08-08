@@ -16,10 +16,10 @@ security add-generic-password -U -a "$USER" -s mcp-token -w
 
 ```dotenv
 MCP_PORT=8000
-# 可选：逗号分隔要跳过的 SKILL.md name；不存在的名称会被忽略。
-# SKILLS_IGNORE=imagegen,blender
 MCP_SANDBOX_DIR_MACOS=~/AI-Share
 MCP_SKILLS_DIR_MACOS=~/.codex/skills
+# 可选：逗号分隔要跳过的 SKILL.md name；不存在的名称会被忽略。
+# SKILLS_IGNORE_MACOS=imagegen,blender
 ```
 
 用启动器实际采用的查询条件验证读取：
